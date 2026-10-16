@@ -620,25 +620,56 @@ window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
 function renderAdminDrawer() {
   const body = document.getElementById('adminDrawerBody');
   const totalRev = orders.reduce((s, o) => s + Number(o.total || 0), 0);
+  const recentMessages = chatMessages.slice(-8);
 
   body.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
       <div class="box-card" style="margin:0;text-align:center;">
-        <div style="font-size:18px;font-weight:900;">${totalRev} ₾</div>
-        <div style="font-size:11px;color:#6b7280;">ბრუნვა</div>
+        <div style="font-size:18px;font-weight:700;">${totalRev} ₾</div>
+        <div style="font-size:11px;color:#71717a;">ბრუნვა</div>
       </div>
       <div class="box-card" style="margin:0;text-align:center;">
-        <div style="font-size:18px;font-weight:900;">${orders.length}</div>
-        <div style="font-size:11px;color:#6b7280;">შეკვეთა</div>
+        <div style="font-size:18px;font-weight:700;">${orders.length}</div>
+        <div style="font-size:11px;color:#71717a;">შეკვეთა</div>
       </div>
       <div class="box-card" style="margin:0;text-align:center;">
-        <div style="font-size:18px;font-weight:900;">${products.length}</div>
-        <div style="font-size:11px;color:#6b7280;">პროდუქტი</div>
+        <div style="font-size:18px;font-weight:700;">${chatMessages.filter((m) => m.sender === 'user').length}</div>
+        <div style="font-size:11px;color:#71717a;">მესიჯი</div>
+      </div>
+    </div>
+
+    <!-- LIVE CUSTOMER CHAT INBOX FOR ADMIN -->
+    <div class="box-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h4 style="font-size:13.5px;font-weight:600;">მყიდველების მესიჯები (Live Chat)</h4>
+        <span style="font-size:11px;color:#10b981;font-weight:600;">● Cloud Synced</span>
+      </div>
+      <div style="max-height:190px;overflow-y:auto;background:#fff;border:1px solid #ebebea;border-radius:8px;padding:10px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px;">
+        ${
+          recentMessages.length === 0
+            ? `<div class="muted-text" style="margin:0;">მესიჯები ჯერ არ არის</div>`
+            : recentMessages
+                .map(
+                  (m) => `
+              <div style="align-self:${m.sender === 'store' ? 'flex-end' : 'flex-start'};max-width:85%;padding:7px 11px;border-radius:8px;font-size:12px;background:${m.sender === 'store' ? '#0f0f10' : '#f7f7f5'};color:${m.sender === 'store' ? '#fff' : '#0f0f10'};">
+                <div style="font-size:10px;opacity:0.7;margin-bottom:2px;font-weight:600;">
+                  ${m.sender === 'store' ? 'ATELIER (ადმინი)' : 'მყიდველი'} · ${m.timestamp || ''}
+                </div>
+                <div>${m.text}</div>
+              </div>
+            `
+                )
+                .join('')
+        }
+      </div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="admChatReplyInp" placeholder="მიწერეთ პასუხი მყიდველს..." class="text-input" style="margin:0;flex:1;" onkeydown="if(event.key==='Enter') sendAdminWebReply()" />
+        <button class="btn-primary" style="padding:8px 16px;" onclick="sendAdminWebReply()">პასუხი</button>
       </div>
     </div>
 
     <div class="box-card">
-      <h4 style="margin-bottom:10px;">+ ახალი პროდუქტის დამატება (Supabase + iOS App)</h4>
+      <h4 style="font-size:13.5px;font-weight:600;margin-bottom:10px;">+ ახალი პროდუქტის დამატება</h4>
       <input type="text" id="admTitle" placeholder="დასახელება (მაგ: ტყავის ქურთუკი)" class="text-input" />
       <div class="form-row-2">
         <input type="text" id="admBrand" value="ZARA STUDIO" placeholder="ბრენდი" class="text-input" />
@@ -655,23 +686,23 @@ function renderAdminDrawer() {
       </div>
       <input type="text" id="admImg" value="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=80" placeholder="ფოტოს URL" class="text-input" />
       <textarea id="admDesc" placeholder="აღწერა..." class="text-input" rows="2"></textarea>
-      <button class="btn-primary full-w" onclick="publishWebProduct()">კატალოგსა და Supabase-ში გამოქვეყნება</button>
+      <button class="btn-primary full-w" onclick="publishWebProduct()">კატალოგში გამოქვეყნება</button>
     </div>
 
     <div class="box-card">
-      <h4 style="margin-bottom:10px;">📦 შემოსული შეკვეთების მართვა (${orders.length})</h4>
+      <h4 style="font-size:13.5px;font-weight:600;margin-bottom:10px;">შემოსული შეკვეთების მართვა (${orders.length})</h4>
       ${
         orders.length === 0
           ? `<div class="muted-text">შეკვეთები ჯერ არ არის</div>`
           : orders
               .map(
                 (o) => `
-          <div style="background:#fff;padding:10px;border-radius:10px;border:1px solid #e5e7eb;margin-bottom:8px;font-size:12px;">
-            <div style="display:flex;justify-content:space-between;font-weight:800;">
-              <span>#${o.id} • ${o.total} ₾</span>
+          <div style="background:#fff;padding:10px;border-radius:8px;border:1px solid #ebebea;margin-bottom:8px;font-size:12px;">
+            <div style="display:flex;justify-content:space-between;font-weight:600;">
+              <span>#${o.id} · ${o.total} ₾</span>
               <span style="color:#059669;">${o.status}</span>
             </div>
-            <div style="color:#6b7280;margin:4px 0;">📍 ${o.city}, ${o.address} (${o.payment_method})</div>
+            <div style="color:#71717a;margin:4px 0;">${o.city}, ${o.address} (${o.payment_method})</div>
             <div style="display:flex;gap:6px;margin-top:6px;">
               ${['მუშავდება', 'გზაშია', 'ჩაბარებულია']
                 .map(
@@ -689,6 +720,34 @@ function renderAdminDrawer() {
     </div>
   `;
 }
+
+window.sendAdminWebReply = async function () {
+  const inp = document.getElementById('admChatReplyInp');
+  if (!inp || !inp.value.trim()) return;
+  const text = inp.value.trim();
+  inp.value = '';
+
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const replyObj = {
+    id: 'msg-admin-' + Date.now(),
+    thread_id: 'thread-store',
+    sender: 'store',
+    text,
+    timestamp: timeStr,
+    product_ref: null,
+  };
+
+  chatMessages.push(replyObj);
+  renderChatMessages();
+  renderAdminDrawer();
+
+  await sbFetch('messages', {
+    method: 'POST',
+    body: JSON.stringify(replyObj),
+  });
+  showToast('პასუხი გაიგზავნა მყიდველთან');
+};
 
 window.publishWebProduct = async function () {
   const title = document.getElementById('admTitle').value.trim();
@@ -986,16 +1045,20 @@ function renderChatMessages() {
 
 async function sendChatMessage(textOverride) {
   const inp = document.getElementById('chatInput');
-  const text = (textOverride ?? inp.value).trim();
-  if (!text) return;
+  const rawText = (textOverride ?? inp.value).trim();
+  if (!rawText) return;
   if (!textOverride) inp.value = '';
+
+  const isAdmin = currentUser.isLoggedIn && currentUser.role === 'seller_admin';
+  const senderLabel = currentUser.isLoggedIn && !isAdmin ? `[${currentUser.name}] ` : '';
+  const text = isAdmin ? rawText : `${senderLabel}${rawText}`;
 
   const now = new Date();
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const msgObj = {
     id: 'msg-web-' + Date.now(),
     thread_id: 'thread-store',
-    sender: 'user',
+    sender: isAdmin ? 'store' : 'user',
     text,
     timestamp: timeStr,
     product_ref: null,
@@ -1008,23 +1071,6 @@ async function sendChatMessage(textOverride) {
     method: 'POST',
     body: JSON.stringify(msgObj),
   });
-
-  setTimeout(async () => {
-    const replyObj = {
-      id: 'msg-web-reply-' + Date.now(),
-      thread_id: 'thread-store',
-      sender: 'store',
-      text: 'მადლობა მოწერისთვის! მოდელი მარაგშია, შეგიძლიათ გამოიყენოთ პრომო კოდი TBILISI20 (-20%) კალათაში. 🎁',
-      timestamp: timeStr,
-      product_ref: null,
-    };
-    chatMessages.push(replyObj);
-    renderChatMessages();
-    await sbFetch('messages', {
-      method: 'POST',
-      body: JSON.stringify(replyObj),
-    });
-  }, 900);
 }
 
 // Event Listeners Setup
