@@ -42,43 +42,6 @@ let products = [
   },
 ];
 
-const stories = [
-  {
-    id: 'st-1',
-    title: 'AW ’26 ლუქბუქი',
-    tag: 'NEW DROP',
-    img: 'https://images.unsplash.com/photo-1539533018447-63fcce2678e3?auto=format&fit=crop&w=400&q=80',
-    prodId: 'prod-1',
-  },
-  {
-    id: 'st-2',
-    title: '-20% კოდი: TBILISI20',
-    tag: 'FLASH SALE',
-    img: 'https://images.unsplash.com/photo-1551028719-00167b16eac5?auto=format&fit=crop&w=400&q=80',
-    prodId: 'prod-2',
-  },
-  {
-    id: 'st-3',
-    title: 'საღამოს კაბები',
-    tag: 'COS ATELIER',
-    img: 'https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=400&q=80',
-    prodId: 'prod-3',
-  },
-  {
-    id: 'st-4',
-    title: 'ტყავის ჩანთები',
-    tag: 'IT-BAGS',
-    img: 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=400&q=80',
-    prodId: 'prod-5',
-  },
-  {
-    id: 'st-5',
-    title: 'ფეხსაცმლის ხაზი',
-    tag: 'TRENDING',
-    img: 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=400&q=80',
-    prodId: 'prod-4',
-  },
-];
 
 let favorites = JSON.parse(localStorage.getItem('atelier_web_favs') || '[]');
 let cart = JSON.parse(localStorage.getItem('atelier_web_cart') || '[]');
@@ -217,6 +180,7 @@ let seenMessageIds = new Set();
 let seenOrderIds = new Set();
 let initialSyncDone = false;
 let lastAdminFingerprint = '';
+let lastProductsSig = '';
 
 function playNotifChime() {
   try {
@@ -293,7 +257,9 @@ async function loadFromSupabase() {
 
     const isAdmin = Boolean(currentUser.isLoggedIn && currentUser.role === 'seller_admin');
 
-    if (prodRes.ok && Array.isArray(prodRes.data)) {
+    const productsSig = prodRes.ok && Array.isArray(prodRes.data) ? JSON.stringify(prodRes.data) : null;
+    if (productsSig !== null && productsSig !== lastProductsSig) {
+      lastProductsSig = productsSig;
       dbProducts = prodRes.data.map((r) => ({
         id: r.id,
         title: r.title,
@@ -314,14 +280,14 @@ async function loadFromSupabase() {
         rawColor: r.color || '',
         rawMaterial: r.material || '',
       }));
-    }
 
-    // Storefront shows only products marked "in stock"; keeps demo items if the DB is empty.
-    if (dbProducts.length > 0) {
-      products = dbProducts.filter((p) => p.inStock !== false);
-      renderCatalog();
-      renderStories();
-      updateBadges();
+      // Storefront shows only products marked "in stock"; keeps demo items if the DB is empty.
+      if (dbProducts.length > 0) {
+        products = dbProducts.filter((p) => p.inStock !== false);
+        renderCatalog();
+        renderHome();
+        updateBadges();
+      }
     }
 
     if (ordRes.ok && Array.isArray(ordRes.data)) {
@@ -386,23 +352,130 @@ async function loadFromSupabase() {
   }
 }
 
-function renderStories() {
-  const strip = document.getElementById('storiesStrip');
-  strip.innerHTML = stories
-    .map(
-      (s) => `
-    <div class="story-card" onclick="openProductModal('${s.prodId}')">
-      <div class="story-avatar-ring">
-        <img src="${s.img}" alt="${s.title}" />
+
+// ===================== Home page sections =====================
+const unsplash = (id, w = 1200) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w}&q=80`;
+const DEFAULT_HOME = {
+  hero: {
+    eyebrow: 'AUTUMN / WINTER ’26 • NEW COLLECTION',
+    title: 'მინიმალიზმი და თანამედროვე სილუეტი.',
+    text: 'შერჩეული კოლექცია იტალიური შალის, ნატურალური ტყავისა და აბრეშუმისგან. შექმნილია თანამედროვე გარდერობისთვის.',
+    image: unsplash('1490481651871-ab68de25d43d', 1400),
+  },
+  categories: {
+    women: unsplash('1539533018447-63fcce2678e3', 700),
+    men: unsplash('1551028719-00167b16eac5', 700),
+    shoes: unsplash('1543163521-1bf539c55dd2', 700),
+    accessories: unsplash('1584917865442-de89df76afd3', 700),
+  },
+  editorial: {
+    eyebrow: 'SEASON EDIT',
+    title: 'სეზონის მთავარი ნივთები',
+    text: 'თბილი ქსოვილები, სუფთა ხაზები და ფერები, რომლებიც ერთმანეთს ერწყმის. შეარჩიეთ ნივთები, რომლებიც წლების განმავლობაში გემსახურებათ.',
+    image: unsplash('1515886657613-9f3515b0c78f', 1400),
+    button: 'კოლექციის ნახვა',
+    category: 'women',
+  },
+};
+
+let homeContent = mergeHome({});
+
+function mergeHome(v) {
+  return {
+    hero: { ...DEFAULT_HOME.hero, ...(v.hero || {}) },
+    categories: { ...DEFAULT_HOME.categories, ...(v.categories || {}) },
+    editorial: { ...DEFAULT_HOME.editorial, ...(v.editorial || {}) },
+  };
+}
+
+async function loadHomeContent() {
+  const res = await sbFetch('site_content?key=eq.home&select=value').catch(() => null);
+  if (res && res.ok && Array.isArray(res.data) && res.data[0]) {
+    homeContent = mergeHome(res.data[0].value || {});
+    renderHome();
+  }
+}
+
+window.goToCategory = function (cat) {
+  const link = document.querySelector(`.nav-link[data-cat="${cat}"]`);
+  if (link) link.click();
+  document.getElementById('catalogAnchor').scrollIntoView({ behavior: 'smooth' });
+};
+
+function stripCard(p) {
+  const hasSale = p.originalPrice && p.originalPrice > p.price;
+  return `
+    <article class="strip-card" data-id="${escapeHtml(p.id)}" onclick="openProductModal(this.dataset.id)">
+      <div class="strip-img">
+        <img src="${escapeHtml(p.images[0] || '')}" alt="${escapeHtml(p.title)}" loading="lazy" />
+        ${hasSale ? `<span class="pill-sale">-${Math.round(((p.originalPrice - p.price) / p.originalPrice) * 100)}%</span>` : ''}
       </div>
-      <div>
-        <div class="story-meta-tag">${s.tag}</div>
-        <div class="story-meta-title">${s.title}</div>
+      <div class="strip-brand">${escapeHtml(p.brand)}</div>
+      <div class="strip-title">${escapeHtml(p.title)}</div>
+      <div class="strip-price">
+        <span class="${hasSale ? 'sale' : ''}">${p.price} ₾</span>
+        ${hasSale ? `<s>${p.originalPrice} ₾</s>` : ''}
       </div>
-    </div>
-  `
-    )
-    .join('');
+    </article>`;
+}
+
+function renderStrip(sectionId, stripId, list) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  section.classList.toggle('hidden', list.length === 0);
+  document.getElementById(stripId).innerHTML = list.map(stripCard).join('');
+}
+
+function renderHome() {
+  const { hero, categories, editorial } = homeContent;
+
+  const setText = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  setText('heroEyebrow', hero.eyebrow);
+  setText('heroTitle', hero.title);
+  setText('heroDesc', hero.text);
+  const heroImg = document.getElementById('heroImg');
+  if (heroImg && hero.image && heroImg.getAttribute('src') !== hero.image) heroImg.src = hero.image;
+
+  const catBox = document.getElementById('homeCategories');
+  if (catBox) {
+    catBox.innerHTML = Object.entries(CATEGORY_LABELS)
+      .map(([cat, label]) => {
+        const count = products.filter((p) => p.category === cat).length;
+        return `
+        <button class="cat-tile" data-cat="${cat}" onclick="goToCategory(this.dataset.cat)">
+          <span class="cat-img"><img src="${escapeHtml(categories[cat] || '')}" alt="${label}" loading="lazy" /></span>
+          <span class="cat-label">${label}</span>
+          <span class="cat-count">${count} მოდელი</span>
+        </button>`;
+      })
+      .join('');
+  }
+
+  renderStrip('homeNewSection', 'homeNewStrip', products.filter((p) => p.isNewArrival).slice(0, 12));
+  renderStrip(
+    'homeSaleSection',
+    'homeSaleStrip',
+    products.filter((p) => p.originalPrice && p.originalPrice > p.price).slice(0, 12)
+  );
+
+  const ed = document.getElementById('homeEditorial');
+  if (ed) {
+    ed.innerHTML = `
+      <div class="editorial-img"><img src="${escapeHtml(editorial.image)}" alt="" loading="lazy" /></div>
+      <div class="editorial-copy">
+        ${editorial.eyebrow ? `<div class="hero-eyebrow">${escapeHtml(editorial.eyebrow)}</div>` : ''}
+        <h2 class="editorial-title">${escapeHtml(editorial.title)}</h2>
+        <p class="hero-desc">${escapeHtml(editorial.text)}</p>
+        ${
+          editorial.button
+            ? `<button class="btn-secondary" data-cat="${escapeHtml(editorial.category)}" onclick="goToCategory(this.dataset.cat)">${escapeHtml(editorial.button)}</button>`
+            : ''
+        }
+      </div>`;
+  }
 }
 
 function renderCatalog() {
@@ -884,7 +957,7 @@ window.setAdminTab = function (tab) {
 function refreshAdminDrawerIfOpen() {
   const backdrop = document.getElementById('adminDrawerBackdrop');
   if (!backdrop || backdrop.classList.contains('hidden')) return;
-  if (adminTab === 'products' && adminEditingProduct) return;
+  if ((adminTab === 'products' && adminEditingProduct) || adminTab === 'home') return;
   const activeId = document.activeElement?.id;
   const reply = document.getElementById('admChatReplyInp')?.value;
   renderAdminDrawer();
@@ -913,12 +986,14 @@ function renderAdminDrawer() {
     ['orders', 'შეკვეთები', pending],
     ['products', 'პროდუქტები', 0],
     ['chat', 'ჩატი', unread],
+    ['home', 'მთავარი გვერდი', 0],
   ];
   const content = {
     overview: adminOverviewHtml,
     orders: adminOrdersHtml,
     products: adminProductsHtml,
     chat: adminChatHtml,
+    home: adminHomeHtml,
   }[adminTab]();
 
   body.innerHTML = `
@@ -938,6 +1013,7 @@ function renderAdminDrawer() {
   if (adminTab === 'orders') renderAdminOrdersList();
   if (adminTab === 'products' && !adminEditingProduct) renderAdminProductsList();
   if (adminTab === 'products' && adminEditingProduct) updatePfPreview();
+  if (adminTab === 'home') updateHomePreviews();
   if (adminTab === 'chat') {
     const box = document.getElementById('admChatMessages');
     if (box) box.scrollTop = box.scrollHeight;
@@ -1470,6 +1546,131 @@ window.deleteWebProduct = async function (id) {
   showToast('პროდუქტი წაიშალა');
 };
 
+
+// ---------- Home page content ----------
+function adminHomeHtml(content = homeContent) {
+  const { hero, categories, editorial } = content;
+  const field = (id, label, value, opts = {}) => `
+    <label class="field-label">${label}</label>
+    ${
+      opts.textarea
+        ? `<textarea id="${id}" class="text-input" rows="3">${escapeHtml(value)}</textarea>`
+        : `<input type="text" id="${id}" class="text-input" value="${escapeHtml(value)}" ${opts.image ? 'oninput="updateHomePreviews()" placeholder="https://..."' : ''} />`
+    }
+    ${opts.image ? `<div class="adm-img-preview" data-preview-for="${id}"></div>` : ''}`;
+
+  return `
+    <p class="adm-sub" style="margin-bottom:14px;">აქ შეცვლილი ტექსტები და ფოტოები შენახვისთანავე გამოჩნდება მთავარ გვერდზე. "ახალი კოლექციის" და "ფასდაკლებების" ზოლები პროდუქტებიდან ავტომატურად ივსება.</p>
+
+    <div class="box-card">
+      <h4 class="adm-h">მთავარი ბანერი</h4>
+      ${field('hmHeroEyebrow', 'ზედა პატარა ტექსტი', hero.eyebrow)}
+      ${field('hmHeroTitle', 'სათაური', hero.title)}
+      ${field('hmHeroText', 'ტექსტი', hero.text, { textarea: true })}
+      ${field('hmHeroImage', 'ფოტოს ბმული', hero.image, { image: true })}
+    </div>
+
+    <div class="box-card">
+      <h4 class="adm-h">კატეგორიების ფოტოები</h4>
+      <div class="form-row-2">
+        ${Object.entries(CATEGORY_LABELS)
+          .map(([cat, label]) => `<div>${field('hmCat_' + cat, label, categories[cat], { image: true })}</div>`)
+          .join('')}
+      </div>
+    </div>
+
+    <div class="box-card">
+      <h4 class="adm-h">ფოტო-ბანერი (გვერდის შუაში)</h4>
+      ${field('hmEdEyebrow', 'ზედა პატარა ტექსტი', editorial.eyebrow)}
+      ${field('hmEdTitle', 'სათაური', editorial.title)}
+      ${field('hmEdText', 'ტექსტი', editorial.text, { textarea: true })}
+      ${field('hmEdImage', 'ფოტოს ბმული', editorial.image, { image: true })}
+      <div class="form-row-2">
+        <div>${field('hmEdButton', 'ღილაკის ტექსტი (ცარიელი = ღილაკის გარეშე)', editorial.button)}</div>
+        <div>
+          <label class="field-label">ღილაკი გახსნის</label>
+          <select id="hmEdCategory" class="text-input">
+            ${[...Object.entries(CATEGORY_LABELS), ['sale', 'ფასდაკლებები'], ['all', 'ყველა მოდელი']]
+              .map(([v, l]) => `<option value="${v}" ${editorial.category === v ? 'selected' : ''}>${l}</option>`)
+              .join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="adm-actions end">
+      <button class="btn-secondary" onclick="resetHomeForm()">საწყისი ტექსტები</button>
+      <button class="btn-primary" id="hmSaveBtn" onclick="saveHomeContent()">შენახვა</button>
+    </div>
+  `;
+}
+
+window.updateHomePreviews = function () {
+  document.querySelectorAll('[data-preview-for]').forEach((box) => {
+    const url = document.getElementById(box.dataset.previewFor)?.value.trim();
+    box.innerHTML = /^https?:\/\//i.test(url || '')
+      ? `<img src="${escapeHtml(url)}" alt="" onerror="this.classList.add('broken')" />`
+      : '';
+  });
+};
+
+window.resetHomeForm = function () {
+  if (!confirm('ფორმაში დავაბრუნო საწყისი ტექსტები და ფოტოები? (შეინახება მხოლოდ "შენახვაზე" დაჭერის შემდეგ)')) return;
+  const body = document.getElementById('adminDrawerBody');
+  const tabs = body.querySelector('.adm-tabs').outerHTML;
+  body.innerHTML = tabs + adminHomeHtml(mergeHome({}));
+  updateHomePreviews();
+};
+
+window.saveHomeContent = async function () {
+  const val = (id) => document.getElementById(id).value.trim();
+  const images = ['hmHeroImage', 'hmEdImage', ...Object.keys(CATEGORY_LABELS).map((c) => 'hmCat_' + c)];
+  if (images.some((id) => !/^https?:\/\//i.test(val(id)))) {
+    showToast('ყველა ფოტოს ბმული უნდა იწყებოდეს https://-ით');
+    return;
+  }
+  if (!val('hmHeroTitle') || !val('hmEdTitle')) {
+    showToast('სათაურები ცარიელი არ უნდა იყოს');
+    return;
+  }
+
+  const value = {
+    hero: { eyebrow: val('hmHeroEyebrow'), title: val('hmHeroTitle'), text: val('hmHeroText'), image: val('hmHeroImage') },
+    categories: Object.fromEntries(Object.keys(CATEGORY_LABELS).map((c) => [c, val('hmCat_' + c)])),
+    editorial: {
+      eyebrow: val('hmEdEyebrow'),
+      title: val('hmEdTitle'),
+      text: val('hmEdText'),
+      image: val('hmEdImage'),
+      button: val('hmEdButton'),
+      category: val('hmEdCategory'),
+    },
+  };
+
+  const btn = document.getElementById('hmSaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'ინახება...';
+  const res = await sbFetch('site_content?on_conflict=key', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ key: 'home', value, updated_at: new Date().toISOString() }),
+  });
+  btn.disabled = false;
+  btn.textContent = 'შენახვა';
+
+  if (!res.ok) {
+    showToast(
+      res.status === 404
+        ? 'ჯერ გაუშვით supabase/003_site_content.sql Supabase-ში'
+        : 'შენახვა ვერ მოხერხდა: ' + (res.data?.message || res.status)
+    );
+    return;
+  }
+  homeContent = mergeHome(value);
+  renderHome();
+  showToast('მთავარი გვერდი განახლდა ✨');
+};
+
 // ---------- Chat ----------
 window.openAdminThread = function (userId) {
   adminActiveThread = userId;
@@ -1922,8 +2123,16 @@ async function sendChatMessage(textOverride) {
 
 // Event Listeners Setup
 document.addEventListener('DOMContentLoaded', () => {
-  renderStories();
+  renderHome();
   renderCatalog();
+  loadHomeContent();
+
+  document.querySelectorAll('.strip-arrow').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const strip = document.getElementById(btn.dataset.strip);
+      strip.scrollBy({ left: Number(btn.dataset.dir) * strip.clientWidth * 0.8, behavior: 'smooth' });
+    })
+  );
   if (isGuestSession()) {
     loadFromSupabase();
   } else if (authSession) {
