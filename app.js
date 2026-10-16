@@ -748,6 +748,13 @@ window.changeWebOrderStatus = async function (ordId, status) {
   showToast(`შეკვეთა #${ordId} სტატუსი განახლდა: ${status}`);
 };
 
+let webAuthTab = 'login'; // 'login' | 'register'
+
+window.switchWebAuthTab = function (tab) {
+  webAuthTab = tab;
+  renderAuthDrawer();
+};
+
 // User Auth Drawer
 function renderAuthDrawer() {
   const body = document.getElementById('authDrawerBody');
@@ -803,47 +810,99 @@ function renderAuthDrawer() {
     `;
   } else {
     body.innerHTML = `
-      <div class="box-card">
-        <div style="font-size:14px;font-weight:600;margin-bottom:12px;">შესვლა / რეგისტრაცია</div>
-        <input type="text" id="authName" placeholder="სახელი" class="text-input" />
-        <input type="email" id="authEmail" placeholder="ელ-ფოსტა *" class="text-input" />
-        <input type="text" id="authPhone" placeholder="ტელეფონი (+995 5...)" class="text-input" />
-        <input type="text" id="authAddress" placeholder="მისამართი" class="text-input" />
-        <input type="password" id="authPass" placeholder="პაროლი *" class="text-input" />
-        <button class="btn-primary full-w" onclick="handleWebAuth()">შესვლა</button>
+      <!-- Segmented Switch: შესვლა | რეგისტრაცია -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;background:#f7f7f5;padding:4px;border-radius:99px;border:1px solid #ebebea;margin-bottom:18px;">
+        <button
+          onclick="switchWebAuthTab('login')"
+          style="padding:9px;border-radius:99px;border:none;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;background:${webAuthTab === 'login' ? '#0f0f10' : 'transparent'};color:${webAuthTab === 'login' ? '#fff' : '#71717a'};"
+        >
+          შესვლა
+        </button>
+        <button
+          onclick="switchWebAuthTab('register')"
+          style="padding:9px;border-radius:99px;border:none;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;background:${webAuthTab === 'register' ? '#0f0f10' : 'transparent'};color:${webAuthTab === 'register' ? '#fff' : '#71717a'};"
+        >
+          რეგისტრაცია
+        </button>
       </div>
+
+      ${
+        webAuthTab === 'login'
+          ? `
+        <div class="box-card">
+          <div style="font-size:14px;font-weight:600;margin-bottom:4px;">ანგარიშზე შესვლა</div>
+          <p class="muted-text" style="font-size:12px;margin-bottom:14px;">შეიყვანეთ თქვენი ელ-ფოსტა და პაროლი</p>
+
+          <label class="field-label">ელ-ფოსტა</label>
+          <input type="email" id="loginEmail" placeholder="name@example.com" class="text-input" />
+
+          <label class="field-label">პაროლი</label>
+          <input type="password" id="loginPass" placeholder="••••••••" class="text-input" />
+
+          <button class="btn-primary full-w" style="margin-top:4px;" onclick="handleWebLogin()">შესვლა</button>
+        </div>
+      `
+          : `
+        <div class="box-card">
+          <div style="font-size:14px;font-weight:600;margin-bottom:4px;">ახალი ანგარიშის შექმნა</div>
+          <p class="muted-text" style="font-size:12px;margin-bottom:14px;">შეავსეთ მონაცემები სწრაფი შეკვეთისთვის</p>
+
+          <label class="field-label">სახელი და გვარი *</label>
+          <input type="text" id="regName" placeholder="მაგ: გიორგი ბერიძე" class="text-input" />
+
+          <label class="field-label">ელ-ფოსტა *</label>
+          <input type="email" id="regEmail" placeholder="name@example.com" class="text-input" />
+
+          <label class="field-label">მობილურის ნომერი</label>
+          <input type="text" id="regPhone" placeholder="+995 555 12 34 56" class="text-input" />
+
+          <label class="field-label">ქალაქი და მისამართი</label>
+          <input type="text" id="regAddress" placeholder="თბილისი, ჭავჭავაძის 37" class="text-input" />
+
+          <label class="field-label">პაროლი *</label>
+          <input type="password" id="regPass" placeholder="მინიმუმ 6 სიმბოლო" class="text-input" />
+
+          <button class="btn-primary full-w" style="margin-top:4px;" onclick="handleWebRegister()">რეგისტრაციის დასრულება</button>
+        </div>
+      `
+      }
     `;
   }
 }
 
-window.handleWebAuth = async function () {
-  const name = document.getElementById('authName').value.trim();
-  const email = document.getElementById('authEmail').value.trim().toLowerCase();
-  const phone = document.getElementById('authPhone').value.trim();
-  const addr = document.getElementById('authAddress').value.trim() || 'თბილისი';
-  const password = document.getElementById('authPass').value.trim();
+window.handleWebLogin = async function () {
+  const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+  const password = document.getElementById('loginPass').value.trim();
 
   if (!email || !password) {
     showToast('შეიყვანეთ ელ-ფოსტა და პაროლი');
     return;
   }
 
-  const isAdminAccount = ADMIN_EMAILS.includes(email) && (password === 'admin123' || password === '4xR5AJ%NA_fQNu!');
+  const isAdminAccount =
+    ADMIN_EMAILS.includes(email) && (password === 'admin123' || password === '4xR5AJ%NA_fQNu!');
+
+  let profileName = isAdminAccount ? 'ვალერი (Admin)' : email.split('@')[0];
+  let profilePhone = '';
+  let profileCity = 'თბილისი';
+  let profileAddress = '';
 
   try {
-    await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-      method: 'POST',
-      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    const profRes = await sbFetch(`profiles?email=eq.${encodeURIComponent(email)}&select=*`);
+    if (profRes.ok && Array.isArray(profRes.data) && profRes.data[0]) {
+      profileName = profRes.data[0].name || profileName;
+      profilePhone = profRes.data[0].phone || '';
+      profileCity = profRes.data[0].city || 'თბილისი';
+      profileAddress = profRes.data[0].address || '';
+    }
   } catch (e) {}
 
   currentUser = {
-    name: name || (isAdminAccount ? 'ვალერი (Admin)' : email.split('@')[0]),
+    name: profileName,
     email,
-    phone,
-    city: 'თბილისი',
-    address: addr,
+    phone: profilePhone,
+    city: profileCity,
+    address: profileAddress,
     role: isAdminAccount ? 'seller_admin' : 'customer',
     isLoggedIn: true,
   };
@@ -854,6 +913,54 @@ window.handleWebAuth = async function () {
       ? 'შეხვედით ადმინისტრატორის სტატუსით'
       : `მოგესალმებით, ${currentUser.name}`
   );
+};
+
+window.handleWebRegister = async function () {
+  const name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim().toLowerCase();
+  const phone = document.getElementById('regPhone').value.trim();
+  const addr = document.getElementById('regAddress').value.trim() || 'თბილისი';
+  const password = document.getElementById('regPass').value.trim();
+
+  if (!name || !email || !password) {
+    showToast('შეავსეთ სახელი, ელ-ფოსტა და პაროლი');
+    return;
+  }
+
+  try {
+    const authRes = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const authData = await authRes.json();
+    const uid = authData?.user?.id || 'u-' + Date.now();
+    await sbFetch('profiles', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: uid,
+        name,
+        email,
+        phone,
+        city: 'თბილისი',
+        address: addr,
+        role: 'customer',
+      }),
+    });
+  } catch (e) {}
+
+  currentUser = {
+    name,
+    email,
+    phone,
+    city: 'თბილისი',
+    address: addr,
+    role: 'customer',
+    isLoggedIn: true,
+  };
+  saveLocalState();
+  renderAuthDrawer();
+  showToast(`რეგისტრაცია დასრულდა, ${name}`);
 };
 
 // Live Chat synced with Supabase messages
