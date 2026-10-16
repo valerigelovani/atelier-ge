@@ -283,6 +283,8 @@
         <input type="tel" id="chatGuestPhone" placeholder="ტელეფონი (სურვილისამებრ)" />
       </div>
       <div class="chat-input-row">
+        <label class="chat-tool" title="ფოტო ან ფაილი">📎<input type="file" accept="image/*,application/pdf" hidden onchange="sendChatFile(this.files[0]); this.value = ''" /></label>
+        <button type="button" class="chat-tool emoji-btn" title="სმაილი" onclick="toggleEmojiPicker('chatInput', this)">🙂</button>
         <input type="text" id="chatInput" placeholder="მოგვწერეთ..." />
         <button id="sendChatBtn">→</button>
       </div>

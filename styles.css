@@ -2196,3 +2196,124 @@ body {
     animation: none;
   }
 }
+
+/* Read receipts */
+.chat-read,
+.adm-read {
+  align-self: flex-end;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: -2px;
+}
+.chat-read {
+  text-align: right;
+  padding: 0 4px;
+}
+.chat-read.seen,
+.adm-read.seen {
+  color: var(--text);
+}
+
+/* ===================== Chat: files & emoji ===================== */
+.chat-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 17px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.chat-tool:hover {
+  background: var(--bg-soft);
+}
+.chat-input-row {
+  align-items: center;
+  gap: 2px;
+}
+.chat-input-row input[type='text'] {
+  margin-left: 4px;
+}
+.chat-input-row #sendChatBtn {
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.adm-reply {
+  align-items: center;
+}
+.msg-img {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  min-height: 80px;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  cursor: zoom-in;
+  margin-bottom: 4px;
+}
+.msg-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.06);
+  color: inherit;
+  font-size: 12.5px;
+  text-decoration: none;
+  word-break: break-all;
+}
+.msg-file span {
+  opacity: 0.6;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.msg-file.uploading {
+  animation: pf-pulse 1.2s ease-in-out infinite;
+}
+.adm-msg.store .msg-file,
+.msg-bubble.user .msg-file {
+  background: rgba(255, 255, 255, 0.15);
+}
+.emoji-picker {
+  position: fixed;
+  z-index: 400;
+  display: grid;
+  grid-template-columns: repeat(8, 34px);
+  gap: 2px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+.emoji-picker.hidden {
+  display: none;
+}
+.emoji-picker button {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 19px;
+  cursor: pointer;
+}
+.emoji-picker button:hover {
+  background: var(--bg-soft);
+}
+.chat-input-row button.chat-tool {
+  background: transparent;
+  color: inherit;
+}
+.chat-input-row button.chat-tool:hover {
+  background: var(--bg-soft);
+}
