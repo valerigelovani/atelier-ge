@@ -99,18 +99,21 @@ let reviews = JSON.parse(
     ])
 );
 
+localStorage.removeItem('atelier_web_user');
 let currentUser = JSON.parse(
-  localStorage.getItem('atelier_web_user') ||
+  localStorage.getItem('atelier_web_user_v2') ||
     JSON.stringify({
-      name: 'ვალერი',
-      email: 'valeri@atelier.ge',
-      phone: '+995 555 12 34 56',
+      name: '',
+      email: '',
+      phone: '',
       city: 'თბილისი',
-      address: 'ჭავჭავაძის გამზ. 37',
-      role: 'seller_admin',
-      isLoggedIn: true,
+      address: '',
+      role: 'customer',
+      isLoggedIn: false,
     })
 );
+
+const ADMIN_EMAILS = ['valeri@atelier.ge', 'valeri.gelovani@yahoo.com', 'admin@atelier.ge'];
 
 let filterState = {
   category: 'all',
@@ -145,7 +148,7 @@ function showToast(msg) {
 function saveLocalState() {
   localStorage.setItem('atelier_web_favs', JSON.stringify(favorites));
   localStorage.setItem('atelier_web_cart', JSON.stringify(cart));
-  localStorage.setItem('atelier_web_user', JSON.stringify(currentUser));
+  localStorage.setItem('atelier_web_user_v2', JSON.stringify(currentUser));
   localStorage.setItem('atelier_web_reviews', JSON.stringify(reviews));
   updateBadges();
 }
@@ -158,6 +161,12 @@ function updateBadges() {
   document.getElementById('headerUserName').textContent = currentUser.isLoggedIn
     ? currentUser.name
     : 'შესვლა';
+
+  const isAdmin = Boolean(currentUser.isLoggedIn && currentUser.role === 'seller_admin');
+  const adminBtn = document.getElementById('openAdminBtn');
+  const heroAddBtn = document.getElementById('heroAddProdBtn');
+  if (adminBtn) adminBtn.classList.toggle('hidden', !isAdmin);
+  if (heroAddBtn) heroAddBtn.classList.toggle('hidden', !isAdmin);
 }
 
 // Load live data from Supabase
@@ -742,35 +751,74 @@ window.changeWebOrderStatus = async function (ordId, status) {
 // User Auth Drawer
 function renderAuthDrawer() {
   const body = document.getElementById('authDrawerBody');
+  const isAdmin = currentUser.isLoggedIn && currentUser.role === 'seller_admin';
+  const myOrders = orders.filter((o) => o.user_email === currentUser.email);
+
   if (currentUser.isLoggedIn) {
     body.innerHTML = `
       <div class="box-card">
-        <div style="font-size:18px;font-weight:800;">${currentUser.name}</div>
-        <div style="font-size:13px;color:#6b7280;margin-top:4px;">${currentUser.email} • ${currentUser.phone}</div>
-        <div style="font-size:13px;margin-top:4px;">📍 ${currentUser.city}, ${currentUser.address}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-size:16px;font-weight:600;">${currentUser.name}</div>
+          <span style="font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:99px;background:${isAdmin ? '#0f0f10' : '#ebebea'};color:${isAdmin ? '#fff' : '#0f0f10'};">
+            ${isAdmin ? 'ADMIN' : 'მყიდველი'}
+          </span>
+        </div>
+        <div style="font-size:12.5px;color:#71717a;margin-top:4px;">${currentUser.email} ${currentUser.phone ? '· ' + currentUser.phone : ''}</div>
+        <div style="font-size:12.5px;color:#71717a;margin-top:3px;">${currentUser.city}${currentUser.address ? ', ' + currentUser.address : ''}</div>
       </div>
-      <button class="btn-primary full-w" style="background:#e11d48;" onclick="currentUser.isLoggedIn=false; saveLocalState(); renderAuthDrawer(); showToast('გამოხვედით ანგარიშიდან');">
+
+      ${
+        isAdmin
+          ? `
+        <button class="btn-primary full-w" style="margin-bottom:14px;" onclick="document.getElementById('authDrawerBackdrop').classList.add('hidden'); renderAdminDrawer(); document.getElementById('adminDrawerBackdrop').classList.remove('hidden');">
+          მაღაზიის მართვის პანელი
+        </button>
+      `
+          : ''
+      }
+
+      <div class="box-card">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">ჩემი შეკვეთები (${myOrders.length})</div>
+        ${
+          myOrders.length === 0
+            ? `<div class="muted-text" style="margin:0;">შეკვეთები ჯერ არ გაქვთ.</div>`
+            : myOrders
+                .map(
+                  (o) => `
+              <div style="background:#fff;padding:10px;border-radius:8px;border:1px solid #ebebea;margin-bottom:6px;font-size:12px;">
+                <div style="display:flex;justify-content:space-between;font-weight:600;">
+                  <span>#${o.id} · ${o.total} ₾</span>
+                  <span style="color:#71717a;">${o.status}</span>
+                </div>
+              </div>
+            `
+                )
+                .join('')
+        }
+      </div>
+
+      <button class="btn-secondary full-w" onclick="currentUser={name:'',email:'',phone:'',city:'თბილისი',address:'',role:'customer',isLoggedIn:false}; saveLocalState(); renderAuthDrawer(); showToast('გამოხვედით ანგარიშიდან');">
         ანგარიშიდან გამოსვლა
       </button>
     `;
   } else {
     body.innerHTML = `
       <div class="box-card">
-        <h4 style="margin-bottom:10px;">შესვლა / რეგისტრაცია (Supabase Cloud)</h4>
-        <input type="text" id="authName" placeholder="სახელი და გვარი" class="text-input" />
+        <div style="font-size:14px;font-weight:600;margin-bottom:12px;">შესვლა / რეგისტრაცია</div>
+        <input type="text" id="authName" placeholder="სახელი" class="text-input" />
         <input type="email" id="authEmail" placeholder="ელ-ფოსტა *" class="text-input" />
-        <input type="text" id="authPhone" value="+995 5" placeholder="ტელეფონი" class="text-input" />
-        <input type="text" id="authAddress" placeholder="ქალაქი და მისამართი" class="text-input" />
+        <input type="text" id="authPhone" placeholder="ტელეფონი (+995 5...)" class="text-input" />
+        <input type="text" id="authAddress" placeholder="მისამართი" class="text-input" />
         <input type="password" id="authPass" placeholder="პაროლი *" class="text-input" />
-        <button class="btn-primary full-w" onclick="handleWebAuth()">შესვლა / რეგისტრაცია</button>
+        <button class="btn-primary full-w" onclick="handleWebAuth()">შესვლა</button>
       </div>
     `;
   }
 }
 
 window.handleWebAuth = async function () {
-  const name = document.getElementById('authName').value.trim() || 'მომხმარებელი';
-  const email = document.getElementById('authEmail').value.trim();
+  const name = document.getElementById('authName').value.trim();
+  const email = document.getElementById('authEmail').value.trim().toLowerCase();
   const phone = document.getElementById('authPhone').value.trim();
   const addr = document.getElementById('authAddress').value.trim() || 'თბილისი';
   const password = document.getElementById('authPass').value.trim();
@@ -779,6 +827,8 @@ window.handleWebAuth = async function () {
     showToast('შეიყვანეთ ელ-ფოსტა და პაროლი');
     return;
   }
+
+  const isAdminAccount = ADMIN_EMAILS.includes(email) && (password === 'admin123' || password === '4xR5AJ%NA_fQNu!');
 
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
@@ -789,17 +839,21 @@ window.handleWebAuth = async function () {
   } catch (e) {}
 
   currentUser = {
-    name,
+    name: name || (isAdminAccount ? 'ვალერი (Admin)' : email.split('@')[0]),
     email,
     phone,
     city: 'თბილისი',
     address: addr,
-    role: 'customer',
+    role: isAdminAccount ? 'seller_admin' : 'customer',
     isLoggedIn: true,
   };
   saveLocalState();
   renderAuthDrawer();
-  showToast(`მოგესალმებით, ${name}! 🎉`);
+  showToast(
+    isAdminAccount
+      ? 'შეხვედით ადმინისტრატორის სტატუსით'
+      : `მოგესალმებით, ${currentUser.name}`
+  );
 };
 
 // Live Chat synced with Supabase messages
