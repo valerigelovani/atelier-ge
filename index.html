@@ -57,10 +57,10 @@
       <div class="hero-copy">
         <div class="hero-eyebrow">
           <span class="live-dot"></span>
-          <span>AUTUMN / WINTER ’26 • NEW COLLECTION</span>
+          <span id="heroEyebrow">AUTUMN / WINTER ’26 • NEW COLLECTION</span>
         </div>
-        <h1 class="hero-title">მინიმალიზმი და თანამედროვე სილუეტი.</h1>
-        <p class="hero-desc">
+        <h1 class="hero-title" id="heroTitle">მინიმალიზმი და თანამედროვე სილუეტი.</h1>
+        <p class="hero-desc" id="heroDesc">
           შერჩეული კოლექცია იტალიური შალის, ნატურალური ტყავისა და აბრეშუმისგან.
           შექმნილია თანამედროვე გარდერობისთვის.
         </p>
@@ -70,15 +70,54 @@
         </div>
       </div>
       <div class="hero-visual">
-        <img src="https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1400&q=85" alt="ATELIER Collection" />
+        <img id="heroImg" src="https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1400&q=85" alt="ATELIER" />
       </div>
     </div>
   </section>
 
-  <!-- Subtle Stories / Highlights Row -->
-  <section class="stories-section">
+  <!-- Categories -->
+  <section class="home-section" id="homeCategoriesSection">
     <div class="container">
-      <div class="stories-strip" id="storiesStrip"></div>
+      <div class="home-head">
+        <h2 class="section-heading">კატეგორიები</h2>
+      </div>
+      <div class="cat-tiles" id="homeCategories"></div>
+    </div>
+  </section>
+
+  <!-- New arrivals strip -->
+  <section class="home-section hidden" id="homeNewSection">
+    <div class="container">
+      <div class="home-head">
+        <h2 class="section-heading">ახალი კოლექცია</h2>
+        <div class="home-head-actions">
+          <button class="strip-arrow" data-strip="homeNewStrip" data-dir="-1" aria-label="უკან">←</button>
+          <button class="strip-arrow" data-strip="homeNewStrip" data-dir="1" aria-label="წინ">→</button>
+        </div>
+      </div>
+      <div class="h-strip" id="homeNewStrip"></div>
+    </div>
+  </section>
+
+  <!-- Editorial banner -->
+  <section class="home-section" id="homeEditorialSection">
+    <div class="container">
+      <div class="editorial" id="homeEditorial"></div>
+    </div>
+  </section>
+
+  <!-- Sale strip -->
+  <section class="home-section hidden" id="homeSaleSection">
+    <div class="container">
+      <div class="home-head">
+        <h2 class="section-heading">ფასდაკლებები</h2>
+        <div class="home-head-actions">
+          <button class="home-link" onclick="goToCategory('sale')">ყველას ნახვა</button>
+          <button class="strip-arrow" data-strip="homeSaleStrip" data-dir="-1" aria-label="უკან">←</button>
+          <button class="strip-arrow" data-strip="homeSaleStrip" data-dir="1" aria-label="წინ">→</button>
+        </div>
+      </div>
+      <div class="h-strip" id="homeSaleStrip"></div>
     </div>
   </section>
 

@@ -103,6 +103,11 @@ security definer
 set search_path = public
 as $$
 begin
+  -- Anonymous chat guests don't get a profile
+  if coalesce(new.is_anonymous, false) then
+    return new;
+  end if;
+
   insert into public.profiles (id, name, email, phone, city, address, role)
   values (
     new.id,
