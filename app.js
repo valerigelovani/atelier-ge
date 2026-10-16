@@ -137,12 +137,41 @@ async function sbFetch(path, options = {}) {
   return { ok: res.ok, status: res.status, data: text ? JSON.parse(text) : null };
 }
 
-function showToast(msg) {
+let seenMessageIds = new Set();
+let seenOrderIds = new Set();
+let initialSyncDone = false;
+let unreadAdminMsgs = 0;
+
+function playNotifChime() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(660, ctx.currentTime);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (e) {}
+}
+
+function showToast(msg, onClickAction = null, duration = 3200) {
   const el = document.getElementById('toastBanner');
   el.textContent = msg;
+  el.style.cursor = onClickAction ? 'pointer' : 'default';
+  el.onclick = onClickAction
+    ? () => {
+        el.classList.add('hidden');
+        onClickAction();
+      }
+    : null;
   el.classList.remove('hidden');
   clearTimeout(window._toastTimer);
-  window._toastTimer = setTimeout(() => el.classList.add('hidden'), 2800);
+  window._toastTimer = setTimeout(() => el.classList.add('hidden'), duration);
 }
 
 function saveLocalState() {
@@ -165,7 +194,13 @@ function updateBadges() {
   const isAdmin = Boolean(currentUser.isLoggedIn && currentUser.role === 'seller_admin');
   const adminBtn = document.getElementById('openAdminBtn');
   const heroAddBtn = document.getElementById('heroAddProdBtn');
-  if (adminBtn) adminBtn.classList.toggle('hidden', !isAdmin);
+  if (adminBtn) {
+    adminBtn.classList.toggle('hidden', !isAdmin);
+    adminBtn.innerHTML =
+      unreadAdminMsgs > 0
+        ? `მართვა <span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:99px;font-size:10px;margin-left:4px;">${unreadAdminMsgs}</span>`
+        : 'მართვა';
+  }
   if (heroAddBtn) heroAddBtn.classList.toggle('hidden', !isAdmin);
 }
 
@@ -177,6 +212,8 @@ async function loadFromSupabase() {
       sbFetch('orders?select=*&order=created_at.desc'),
       sbFetch('messages?select=*&order=created_at.asc'),
     ]);
+
+    const isAdmin = Boolean(currentUser.isLoggedIn && currentUser.role === 'seller_admin');
 
     if (prodRes.ok && Array.isArray(prodRes.data) && prodRes.data.length > 0) {
       products = prodRes.data.map((r) => ({
@@ -205,13 +242,70 @@ async function loadFromSupabase() {
     }
 
     if (ordRes.ok && Array.isArray(ordRes.data)) {
+      if (initialSyncDone && isAdmin) {
+        ordRes.data.forEach((o) => {
+          if (!seenOrderIds.has(o.id)) {
+            playNotifChime();
+            showToast(
+              `🔔 ახალი შეკვეთა #${o.id} (${o.total} ₾) — დააჭირე სანახავად`,
+              () => {
+                renderAdminDrawer();
+                document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
+              },
+              6000
+            );
+          }
+        });
+      }
+      ordRes.data.forEach((o) => seenOrderIds.add(o.id));
       orders = ordRes.data;
     }
 
     if (msgRes.ok && Array.isArray(msgRes.data)) {
+      if (initialSyncDone) {
+        msgRes.data.forEach((m) => {
+          if (!seenMessageIds.has(m.id)) {
+            if (isAdmin && m.sender === 'user') {
+              unreadAdminMsgs += 1;
+              updateBadges();
+              playNotifChime();
+              showToast(
+                `💬 ახალი მესიჯი მყიდველისგან: "${m.text}" — დააჭირე საპასუხოდ`,
+                () => {
+                  unreadAdminMsgs = 0;
+                  updateBadges();
+                  renderAdminDrawer();
+                  document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
+                },
+                6000
+              );
+              const admDrawer = document.getElementById('adminDrawerBackdrop');
+              if (admDrawer && !admDrawer.classList.contains('hidden')) {
+                const inpVal = document.getElementById('admChatReplyInp')?.value || '';
+                renderAdminDrawer();
+                const newInp = document.getElementById('admChatReplyInp');
+                if (newInp) newInp.value = inpVal;
+              }
+            } else if (!isAdmin && m.sender === 'store') {
+              playNotifChime();
+              showToast(
+                `💬 ახალი პასუხი ATELIER-ისგან: "${m.text}"`,
+                () => {
+                  document.getElementById('chatWindow').classList.remove('hidden');
+                  renderChatMessages();
+                },
+                5500
+              );
+            }
+          }
+        });
+      }
+      msgRes.data.forEach((m) => seenMessageIds.add(m.id));
       chatMessages = msgRes.data;
       renderChatMessages();
     }
+
+    initialSyncDone = true;
   } catch (e) {
     console.warn('Using local fallback', e);
   }
@@ -1080,8 +1174,8 @@ document.addEventListener('DOMContentLoaded', () => {
   updateBadges();
   loadFromSupabase();
 
-  // Poll Supabase every 5 seconds for cross-platform sync with iOS app
-  setInterval(loadFromSupabase, 5000);
+  // Poll Supabase every 3 seconds for real-time notifications & cross-platform sync
+  setInterval(loadFromSupabase, 3000);
 
   // Category Nav
   document.querySelectorAll('.nav-link').forEach((btn) => {
@@ -1124,6 +1218,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('catalogAnchor').scrollIntoView({ behavior: 'smooth' });
   });
   document.getElementById('heroAddProdBtn').addEventListener('click', () => {
+    unreadAdminMsgs = 0;
+    updateBadges();
     renderAdminDrawer();
     document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
   });
@@ -1168,6 +1264,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('openAdminBtn').addEventListener('click', () => {
+    unreadAdminMsgs = 0;
+    updateBadges();
     renderAdminDrawer();
     document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
   });
