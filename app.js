@@ -107,7 +107,7 @@ function saveAuthSession(data) {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
         expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
-        user: { id: data.user?.id, email: data.user?.email },
+        user: { id: data.user?.id, email: data.user?.email, isAnonymous: Boolean(data.user?.is_anonymous) },
       }
     : null;
   if (authSession) localStorage.setItem('atelier_auth_session', JSON.stringify(authSession));
@@ -130,6 +130,20 @@ async function authRequest(path, body, token) {
     data = text ? JSON.parse(text) : null;
   } catch (e) {}
   return { ok: res.ok, status: res.status, data };
+}
+
+// Guests get an anonymous Supabase session so they can chat without registering;
+// RLS still limits them to their own messages.
+function isGuestSession() {
+  return Boolean(authSession && authSession.user.isAnonymous);
+}
+
+async function ensureGuestSession() {
+  if (authSession) return true;
+  const res = await authRequest('signup', { data: {} }).catch(() => ({ ok: false }));
+  if (!res.ok || !res.data?.access_token) return false;
+  saveAuthSession(res.data);
+  return true;
 }
 
 let refreshPromise = null;
@@ -274,7 +288,7 @@ async function loadFromSupabase() {
     const [prodRes, ordRes, msgRes] = await Promise.all([
       sbFetch('products?select=*&order=created_at.desc'),
       loggedIn ? sbFetch('orders?select=*&order=created_at.desc') : empty,
-      loggedIn ? sbFetch('messages?select=*&order=created_at.asc') : empty,
+      authSession ? sbFetch('messages?select=*&order=created_at.asc') : empty,
     ]);
 
     const isAdmin = Boolean(currentUser.isLoggedIn && currentUser.role === 'seller_admin');
@@ -719,7 +733,7 @@ window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
 
   const newOrder = {
     id: orderId,
-    user_email: authSession ? authSession.user.email : null,
+    user_email: currentUser.isLoggedIn && authSession ? authSession.user.email : null,
     date: dateStr,
     items: cart,
     subtotal,
@@ -1811,9 +1825,25 @@ window.handleWebRegister = async function () {
 };
 
 // Live Chat synced with Supabase messages
+let guestInfo = JSON.parse(localStorage.getItem('atelier_guest_info') || 'null') || { name: '', phone: '' };
+
 function renderChatMessages() {
   const list = document.getElementById('chatMessagesList');
   if (!list) return;
+
+  // Guests leave a name (and optionally a phone) with their first message
+  const guestRow = document.getElementById('chatGuestRow');
+  if (guestRow) {
+    const showGuestRow = !currentUser.isLoggedIn && !chatMessages.some((m) => m.sender === 'user');
+    guestRow.classList.toggle('hidden', !showGuestRow);
+    if (showGuestRow) {
+      const n = document.getElementById('chatGuestName');
+      const ph = document.getElementById('chatGuestPhone');
+      if (n && !n.value) n.value = guestInfo.name;
+      if (ph && !ph.value) ph.value = guestInfo.phone;
+    }
+  }
+
   if (chatMessages.length === 0) {
     list.innerHTML = `<div class="msg-bubble store">გამარჯობა! 👋 კეთილი იყოს თქვენი მობრძანება ATELIER-ის ვებ-საიტზე. როგორ დაგეხმაროთ?</div>`;
     return;
@@ -1822,7 +1852,7 @@ function renderChatMessages() {
     .map(
       (m) => `
     <div class="msg-bubble ${m.sender === 'user' ? 'user' : 'store'}">
-      <div>${escapeHtml(m.text)}</div>
+      <div>${escapeHtml(m.sender === 'user' ? messageBody(m) : m.text)}</div>
       <div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right;">${escapeHtml(m.timestamp)}</div>
     </div>
   `
@@ -1837,23 +1867,29 @@ async function sendChatMessage(textOverride) {
   if (!rawText) return;
   if (!textOverride) inp.value = '';
 
-  if (!authSession || !currentUser.isLoggedIn) {
-    showToast('მესიჯის გასაგზავნად შედით ანგარიშზე', () => {
-      renderAuthDrawer();
-      document.getElementById('authDrawerBackdrop').classList.remove('hidden');
-    });
-    if (!textOverride) inp.value = rawText;
-    return;
-  }
-
-  const isAdmin = currentUser.role === 'seller_admin';
+  const isAdmin = currentUser.isLoggedIn && currentUser.role === 'seller_admin';
   if (isAdmin) {
     // Admin replies go to a specific customer's thread from the admin panel
     if (!textOverride) inp.value = rawText;
     openAdminPanel('chat');
     return;
   }
-  const text = `[${currentUser.name}] ${rawText}`;
+
+  let senderName = currentUser.name;
+  if (!currentUser.isLoggedIn) {
+    const name = document.getElementById('chatGuestName')?.value.trim() || guestInfo.name;
+    const phone = document.getElementById('chatGuestPhone')?.value.trim() || guestInfo.phone;
+    guestInfo = { name, phone };
+    localStorage.setItem('atelier_guest_info', JSON.stringify(guestInfo));
+    senderName = `${name || 'სტუმარი'}${phone ? ' · ' + phone : ''} (სტუმარი)`;
+
+    if (!(await ensureGuestSession())) {
+      if (!textOverride) inp.value = rawText;
+      showToast('მესიჯი ვერ გაიგზავნა, სცადეთ თავიდან ან შედით ანგარიშზე');
+      return;
+    }
+  }
+  const text = `[${senderName}] ${rawText}`;
 
   const now = new Date();
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -1861,7 +1897,7 @@ async function sendChatMessage(textOverride) {
     id: 'msg-web-' + Date.now(),
     thread_id: 'thread-' + authSession.user.id,
     user_id: authSession.user.id,
-    sender_name: currentUser.name,
+    sender_name: senderName,
     sender: 'user',
     text,
     timestamp: timeStr,
@@ -1869,19 +1905,28 @@ async function sendChatMessage(textOverride) {
   };
 
   chatMessages.push(msgObj);
+  seenMessageIds.add(msgObj.id);
   renderChatMessages();
 
-  await sbFetch('messages', {
+  const res = await sbFetch('messages', {
     method: 'POST',
     body: JSON.stringify(msgObj),
-  });
+  }).catch(() => ({ ok: false }));
+  if (!res.ok) {
+    chatMessages = chatMessages.filter((m) => m.id !== msgObj.id);
+    renderChatMessages();
+    if (!textOverride) inp.value = rawText;
+    showToast('მესიჯი ვერ გაიგზავნა, სცადეთ თავიდან');
+  }
 }
 
 // Event Listeners Setup
 document.addEventListener('DOMContentLoaded', () => {
   renderStories();
   renderCatalog();
-  if (authSession) {
+  if (isGuestSession()) {
+    loadFromSupabase();
+  } else if (authSession) {
     loadSignedInUser().then((ok) => {
       if (!ok) logoutLocal();
       loadFromSupabase();
