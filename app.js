@@ -160,9 +160,9 @@ async function resizeImage(file, maxSide = 1600) {
   );
 }
 
-async function uploadImage(file) {
+async function uploadImage(file, maxSide = 1600) {
   if (!file.type.startsWith('image/')) throw new Error('აირჩიეთ ფოტო');
-  const blob = await resizeImage(file);
+  const blob = await resizeImage(file, maxSide);
   const token = await getAccessToken();
   const path = `${new Date().toISOString().slice(0, 7)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${IMAGE_BUCKET}/${path}`, {
@@ -1825,7 +1825,7 @@ function adminHomeHtml(content = homeContent) {
       ${field('hmHeroEyebrow', 'ზედა პატარა ტექსტი', hero.eyebrow)}
       ${field('hmHeroTitle', 'სათაური', hero.title)}
       ${field('hmHeroText', 'ტექსტი', hero.text, { textarea: true })}
-      ${field('hmHeroImage', 'ფოტოს ბმული', hero.image, { image: true })}
+      ${field('hmHeroImage', 'ფოტო (ფართო, ჰორიზონტალური; ქვედა მარცხენა მხარე მშვიდი, რადგან იქ ტექსტი ჯდება)', hero.image, { image: true })}
     </div>
 
     ${lookbook
@@ -1882,7 +1882,8 @@ window.uploadIntoField = async function (inputId, fileInput) {
   const label = fileInput.parentElement;
   label.classList.add('busy');
   try {
-    document.getElementById(inputId).value = await uploadImage(file);
+    // the full-width hero needs more pixels than product photos
+    document.getElementById(inputId).value = await uploadImage(file, inputId === 'hmHeroImage' ? 2400 : 1600);
     updateHomePreviews();
     showToast('ფოტო აიტვირთა — არ დაგავიწყდეთ "შენახვა"');
   } catch (e) {
