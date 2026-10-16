@@ -160,30 +160,163 @@ async function resizeImage(file, maxSide = 1600) {
   );
 }
 
-async function uploadImage(file, maxSide = 1600) {
-  if (!file.type.startsWith('image/')) throw new Error('აირჩიეთ ფოტო');
-  const blob = await resizeImage(file, maxSide);
+async function storageUpload(bucket, path, body, contentType, setupHint) {
   const token = await getAccessToken();
-  const path = `${new Date().toISOString().slice(0, 7)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${IMAGE_BUCKET}/${path}`, {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
     method: 'POST',
     headers: {
       apikey: SUPABASE_KEY,
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'image/jpeg',
+      'Content-Type': contentType,
       'x-upsert': 'false',
     },
-    body: blob,
+    body,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    if (res.status === 404 || /bucket/i.test(err.message || '')) {
-      throw new Error('ჯერ გაუშვით supabase/005_image_storage.sql Supabase-ში');
-    }
+    if (res.status === 404 || /bucket/i.test(err.message || '')) throw new Error(setupHint);
     throw new Error('ატვირთვა ვერ მოხერხდა: ' + (err.message || res.status));
   }
+}
+
+const randomName = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+async function uploadImage(file, maxSide = 1600) {
+  if (!file.type.startsWith('image/')) throw new Error('აირჩიეთ ფოტო');
+  const blob = await resizeImage(file, maxSide);
+  const path = `${new Date().toISOString().slice(0, 7)}/${randomName()}.jpg`;
+  await storageUpload(IMAGE_BUCKET, path, blob, 'image/jpeg', 'ჯერ გაუშვით supabase/005_image_storage.sql Supabase-ში');
   return `${SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${path}`;
 }
+
+// ---- Chat attachments: private bucket "chat-files" (supabase/008_chat_media.sql) ----
+// Files live in a folder named after the customer's user id; only that
+// customer and the admin can open them (through short-lived signed links).
+const CHAT_BUCKET = 'chat-files';
+const CHAT_MAX_BYTES = 10 * 1024 * 1024;
+const CHAT_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
+
+async function uploadChatFile(file, threadUserId) {
+  if (!CHAT_FILE_TYPES.includes(file.type) && !file.type.startsWith('image/')) {
+    throw new Error('შეიძლება მხოლოდ ფოტო ან PDF ფაილი');
+  }
+  let body = file;
+  let type = file.type;
+  let ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // photos are shrunk like product photos; GIFs and PDFs go as they are
+  if (file.type.startsWith('image/') && file.type !== 'image/gif') {
+    body = await resizeImage(file, 1600);
+    type = 'image/jpeg';
+    ext = 'jpg';
+  }
+  if (body.size > CHAT_MAX_BYTES) throw new Error('ფაილი 10 MB-ზე დიდია');
+  const path = `${threadUserId}/${randomName()}.${ext}`;
+  await storageUpload(CHAT_BUCKET, path, body, type, 'ფაილების გაგზავნა ჯერ არ არის ჩართული (supabase/008_chat_media.sql)');
+  return { path, name: file.name.slice(0, 120), type, size: body.size };
+}
+
+const signedChatUrls = new Map(); // path -> { url, expires }
+function cachedChatUrl(path) {
+  const hit = signedChatUrls.get(path);
+  return hit && hit.expires > Date.now() ? hit.url : '';
+}
+
+async function signChatPaths(paths) {
+  const need = [...new Set(paths)].filter((p) => !cachedChatUrl(p));
+  if (!need.length) return;
+  const token = await getAccessToken();
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${CHAT_BUCKET}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expiresIn: 3600, paths: need }),
+  }).catch(() => null);
+  if (!res || !res.ok) return;
+  const list = await res.json().catch(() => []);
+  list.forEach((r) => {
+    if (r.signedURL) {
+      signedChatUrls.set(r.path, { url: `${SUPABASE_URL}/storage/v1${r.signedURL}`, expires: Date.now() + 50 * 60 * 1000 });
+    }
+  });
+}
+
+function formatBytes(n) {
+  return n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+function attachmentHtml(m) {
+  const a = m.attachment;
+  if (!a || !a.path) return '';
+  if (a.uploading) return `<div class="msg-file uploading">📎 ${escapeHtml(a.name)} — იტვირთება…</div>`;
+  const url = cachedChatUrl(a.path);
+  if (a.type && a.type.startsWith('image/')) {
+    return `<img class="msg-img" data-chat-path="${escapeHtml(a.path)}" ${url ? `src="${escapeHtml(url)}"` : ''} alt="${escapeHtml(a.name || 'ფოტო')}" onclick="openChatImage(this)" />`;
+  }
+  return `<a class="msg-file" data-chat-path="${escapeHtml(a.path)}" ${url ? `href="${escapeHtml(url)}"` : ''} target="_blank" rel="noopener">📄 ${escapeHtml(a.name || 'ფაილი')} <span>${formatBytes(a.size || 0)}</span></a>`;
+}
+
+// Fill in signed links for attachments rendered without one yet
+async function hydrateChatFiles(container) {
+  if (!container) return;
+  const els = [...container.querySelectorAll('[data-chat-path]')].filter((el) => !el.getAttribute('src') && !el.getAttribute('href'));
+  if (!els.length) return;
+  await signChatPaths(els.map((el) => el.dataset.chatPath));
+  els.forEach((el) => {
+    const url = cachedChatUrl(el.dataset.chatPath);
+    if (!url) return;
+    if (el.tagName === 'IMG') el.src = url;
+    else el.href = url;
+  });
+}
+
+window.openChatImage = function (img) {
+  if (img.src) showLightbox([img.src], 0);
+};
+
+// Short label for previews/notifications when a message is only a file
+function messagePreview(m) {
+  const body = messageBody(m);
+  if (body) return body;
+  if (m.attachment) return m.attachment.type?.startsWith('image/') ? '📷 ფოტო' : '📄 ფაილი';
+  return '';
+}
+
+// ---- Emoji picker (no library: a fixed set of common emoji) ----
+const EMOJIS = ['😊', '😂', '😍', '🥰', '😉', '🙂', '😅', '🤔', '😢', '😮', '🙏', '👍', '👌', '👏', '💪', '🤝', '❤️', '🖤', '🤍', '🔥', '✨', '🎉', '🎁', '💯', '✅', '❌', '👗', '👠', '👜', '🧥', '👖', '👟', '🕶️', '💍', '🛍️', '📦', '🚚', '💳', '📏', '📷'];
+
+window.toggleEmojiPicker = function (inputId, btn) {
+  let picker = document.getElementById('emojiPicker');
+  if (picker && picker.dataset.for === inputId && !picker.classList.contains('hidden')) {
+    picker.classList.add('hidden');
+    return;
+  }
+  if (!picker) {
+    picker = document.createElement('div');
+    picker.id = 'emojiPicker';
+    picker.className = 'emoji-picker';
+    picker.innerHTML = EMOJIS.map((e) => `<button type="button">${e}</button>`).join('');
+    document.body.appendChild(picker);
+    picker.addEventListener('click', (ev) => {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      const inp = document.getElementById(picker.dataset.for);
+      if (!inp) return;
+      const start = inp.selectionStart ?? inp.value.length;
+      const end = inp.selectionEnd ?? inp.value.length;
+      inp.value = inp.value.slice(0, start) + b.textContent + inp.value.slice(end);
+      inp.focus();
+      inp.setSelectionRange(start + b.textContent.length, start + b.textContent.length);
+    });
+    document.addEventListener('click', (ev) => {
+      if (!picker.contains(ev.target) && !ev.target.closest('.emoji-btn')) picker.classList.add('hidden');
+    });
+  }
+  picker.dataset.for = inputId;
+  picker.classList.remove('hidden');
+  const r = btn.getBoundingClientRect();
+  const w = picker.offsetWidth;
+  picker.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+  picker.style.top = `${Math.max(8, r.top - picker.offsetHeight - 8)}px`;
+};
 
 const EMPTY_USER = {
   name: '',
@@ -369,7 +502,7 @@ async function loadFromSupabase() {
             if (isAdmin && m.sender === 'user') {
               playNotifChime();
               showToast(
-                `💬 ახალი მესიჯი: "${messageBody(m)}" — დააჭირე საპასუხოდ`,
+                `💬 ახალი მესიჯი: "${messagePreview(m)}" — დააჭირე საპასუხოდ`,
                 () => openAdminPanel('chat', { thread: m.user_id }),
                 6000
               );
@@ -388,7 +521,8 @@ async function loadFromSupabase() {
         });
       }
       msgRes.data.forEach((m) => seenMessageIds.add(m.id));
-      chatMessages = msgRes.data;
+      // keep files that are still uploading (not in the database yet)
+      chatMessages = [...msgRes.data, ...chatMessages.filter((m) => m.attachment?.uploading)];
       renderChatMessages();
     }
 
@@ -1082,7 +1216,7 @@ function adminChatThreads() {
     if (m.sender === 'user' && m.sender_name) t.label = m.sender_name;
     if (ts >= t.last) {
       t.last = ts;
-      t.lastText = (m.sender === 'store' ? 'თქვენ: ' : '') + messageBody(m);
+      t.lastText = (m.sender === 'store' ? 'თქვენ: ' : '') + messagePreview(m);
     }
     const unread = hasReadColumn() ? !m.read_at : ts > (adminSeen[m.user_id] || 0);
     if (m.sender === 'user' && unread) t.unread += 1;
@@ -1241,6 +1375,7 @@ function renderAdminDrawer() {
   if (adminTab === 'chat') {
     const box = document.getElementById('admChatMessages');
     if (box) box.scrollTop = box.scrollHeight;
+    hydrateChatFiles(box);
   }
   updateBadges();
 }
@@ -2046,7 +2181,8 @@ function adminChatHtml() {
                     .map(
                       (m) => `
               <div class="adm-msg ${m.sender === 'store' ? 'store' : 'user'}">
-                <div>${escapeHtml(messageBody(m))}</div>
+                ${attachmentHtml(m)}
+                ${messageBody(m) ? `<div>${escapeHtml(messageBody(m))}</div>` : ''}
                 <div class="adm-msg-time">${escapeHtml(formatDateTime(m.created_at) || m.timestamp || '')}</div>
               </div>`
                     )
@@ -2055,6 +2191,8 @@ function adminChatHtml() {
             }
           </div>
           <div class="adm-reply">
+            <label class="chat-tool" title="ფოტო ან ფაილი">📎<input type="file" accept="image/*,application/pdf" hidden onchange="sendAdminFile(this.files[0]); this.value = ''" /></label>
+            <button type="button" class="chat-tool emoji-btn" title="სმაილი" onclick="toggleEmojiPicker('admChatReplyInp', this)">🙂</button>
             <input type="text" id="admChatReplyInp" class="text-input" placeholder="დაწერეთ პასუხი..." onkeydown="if(event.key==='Enter') sendAdminWebReply()" />
             <button class="btn-primary" onclick="sendAdminWebReply()">გაგზავნა</button>
           </div>`
@@ -2064,6 +2202,35 @@ function adminChatHtml() {
     </div>
   `;
 }
+
+window.sendAdminFile = async function (file) {
+  if (!file || !adminActiveThread) return;
+  const thread = adminActiveThread;
+  const now = new Date();
+  const msg = {
+    id: 'msg-admin-' + Date.now(),
+    thread_id: 'thread-' + thread,
+    user_id: thread,
+    sender: 'store',
+    text: '',
+    timestamp: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+    product_ref: null,
+  };
+  const local = { ...msg, created_at: now.toISOString(), attachment: { path: 'pending', name: file.name, uploading: true } };
+  chatMessages.push(local);
+  seenMessageIds.add(msg.id);
+  renderAdminDrawer();
+  try {
+    msg.attachment = await uploadChatFile(file, thread);
+    const res = await sbFetch('messages', { method: 'POST', body: JSON.stringify(msg) });
+    if (!res.ok) throw new Error('ფაილი აიტვირთა, მაგრამ მესიჯი ვერ გაიგზავნა');
+    local.attachment = msg.attachment;
+  } catch (e) {
+    chatMessages = chatMessages.filter((m) => m !== local);
+    showToast(e.message, null, 6000);
+  }
+  renderAdminDrawer();
+};
 
 window.sendAdminWebReply = async function () {
   const inp = document.getElementById('admChatReplyInp');
@@ -2381,18 +2548,48 @@ function renderChatMessages() {
     .map(
       (m) => `
     <div class="msg-bubble ${m.sender === 'user' ? 'user' : 'store'}">
-      <div>${escapeHtml(m.sender === 'user' ? messageBody(m) : m.text)}</div>
+      ${attachmentHtml(m)}
+      ${(m.sender === 'user' ? messageBody(m) : m.text) ? `<div>${escapeHtml(m.sender === 'user' ? messageBody(m) : m.text)}</div>` : ''}
       <div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right;">${escapeHtml(m.timestamp)}</div>
     </div>
   `
     )
     .join('') + (isStoreAdmin ? '' : readStatusHtml(chatMessages, 'user', 'chat-read'));
   list.scrollTop = list.scrollHeight;
+  hydrateChatFiles(list);
 
   // The customer has the chat open: the store's replies count as seen
   const open = !document.getElementById('chatWindow').classList.contains('hidden');
   if (open && !isStoreAdmin) markMessagesRead(chatMessages.filter((m) => m.sender === 'store'));
 }
+
+// Customer side: who is writing (signed-in name, or a guest's name/phone).
+// Returns the display name, or null if a guest session couldn't be started.
+async function prepareCustomerSender() {
+  if (currentUser.isLoggedIn) return currentUser.name;
+  const name = document.getElementById('chatGuestName')?.value.trim() || guestInfo.name;
+  const phone = document.getElementById('chatGuestPhone')?.value.trim() || guestInfo.phone;
+  guestInfo = { name, phone };
+  localStorage.setItem('atelier_guest_info', JSON.stringify(guestInfo));
+  if (!(await ensureGuestSession())) return null;
+  return `${name || 'სტუმარი'}${phone ? ' · ' + phone : ''} (სტუმარი)`;
+}
+
+function customerMessage(senderName, rawText) {
+  const now = new Date();
+  return {
+    id: 'msg-web-' + Date.now(),
+    thread_id: 'thread-' + authSession.user.id,
+    user_id: authSession.user.id,
+    sender_name: senderName,
+    sender: 'user',
+    text: `[${senderName}] ${rawText}`,
+    timestamp: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+    product_ref: null,
+  };
+}
+
+const isStoreAdminUser = () => currentUser.isLoggedIn && currentUser.role === 'seller_admin';
 
 async function sendChatMessage(textOverride) {
   const inp = document.getElementById('chatInput');
@@ -2400,42 +2597,20 @@ async function sendChatMessage(textOverride) {
   if (!rawText) return;
   if (!textOverride) inp.value = '';
 
-  const isAdmin = currentUser.isLoggedIn && currentUser.role === 'seller_admin';
-  if (isAdmin) {
+  if (isStoreAdminUser()) {
     // Admin replies go to a specific customer's thread from the admin panel
     if (!textOverride) inp.value = rawText;
     openAdminPanel('chat');
     return;
   }
 
-  let senderName = currentUser.name;
-  if (!currentUser.isLoggedIn) {
-    const name = document.getElementById('chatGuestName')?.value.trim() || guestInfo.name;
-    const phone = document.getElementById('chatGuestPhone')?.value.trim() || guestInfo.phone;
-    guestInfo = { name, phone };
-    localStorage.setItem('atelier_guest_info', JSON.stringify(guestInfo));
-    senderName = `${name || 'სტუმარი'}${phone ? ' · ' + phone : ''} (სტუმარი)`;
-
-    if (!(await ensureGuestSession())) {
-      if (!textOverride) inp.value = rawText;
-      showToast('მესიჯი ვერ გაიგზავნა, სცადეთ თავიდან ან შედით ანგარიშზე');
-      return;
-    }
+  const senderName = await prepareCustomerSender();
+  if (!senderName) {
+    if (!textOverride) inp.value = rawText;
+    showToast('მესიჯი ვერ გაიგზავნა, სცადეთ თავიდან ან შედით ანგარიშზე');
+    return;
   }
-  const text = `[${senderName}] ${rawText}`;
-
-  const now = new Date();
-  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const msgObj = {
-    id: 'msg-web-' + Date.now(),
-    thread_id: 'thread-' + authSession.user.id,
-    user_id: authSession.user.id,
-    sender_name: senderName,
-    sender: 'user',
-    text,
-    timestamp: timeStr,
-    product_ref: null,
-  };
+  const msgObj = customerMessage(senderName, rawText);
 
   chatMessages.push(msgObj);
   seenMessageIds.add(msgObj.id);
@@ -2452,6 +2627,39 @@ async function sendChatMessage(textOverride) {
     showToast('მესიჯი ვერ გაიგზავნა, სცადეთ თავიდან');
   }
 }
+
+window.sendChatFile = async function (file) {
+  if (!file) return;
+  if (isStoreAdminUser()) {
+    openAdminPanel('chat');
+    return;
+  }
+  const senderName = await prepareCustomerSender();
+  if (!senderName) {
+    showToast('ფაილი ვერ გაიგზავნა, სცადეთ თავიდან ან შედით ანგარიშზე');
+    return;
+  }
+  // an optional caption from the text box goes with the file
+  const inp = document.getElementById('chatInput');
+  const caption = inp.value.trim();
+  inp.value = '';
+  const msgObj = customerMessage(senderName, caption);
+  const local = { ...msgObj, attachment: { path: 'pending', name: file.name, uploading: true } };
+  chatMessages.push(local);
+  seenMessageIds.add(msgObj.id);
+  renderChatMessages();
+  try {
+    msgObj.attachment = await uploadChatFile(file, authSession.user.id);
+    const res = await sbFetch('messages', { method: 'POST', body: JSON.stringify(msgObj) });
+    if (!res.ok) throw new Error('ფაილი აიტვირთა, მაგრამ მესიჯი ვერ გაიგზავნა');
+    local.attachment = msgObj.attachment;
+  } catch (e) {
+    chatMessages = chatMessages.filter((m) => m !== local);
+    if (caption) inp.value = caption;
+    showToast(e.message, null, 6000);
+  }
+  renderChatMessages();
+};
 
 // Event Listeners Setup
 document.addEventListener('DOMContentLoaded', () => {
