@@ -82,6 +82,7 @@ const stories = [
 
 let favorites = JSON.parse(localStorage.getItem('atelier_web_favs') || '["prod-1","prod-5"]');
 let cart = JSON.parse(localStorage.getItem('atelier_web_cart') || '[]');
+let dbProducts = []; // every product row in the database, including hidden ones (admin panel)
 let orders = [];
 let chatMessages = [];
 let reviews = JSON.parse(
@@ -215,7 +216,7 @@ async function sbFetch(path, options = {}) {
 let seenMessageIds = new Set();
 let seenOrderIds = new Set();
 let initialSyncDone = false;
-let unreadAdminMsgs = 0;
+let lastAdminFingerprint = '';
 
 function playNotifChime() {
   try {
@@ -271,9 +272,10 @@ function updateBadges() {
   const heroAddBtn = document.getElementById('heroAddProdBtn');
   if (adminBtn) {
     adminBtn.classList.toggle('hidden', !isAdmin);
+    const alerts = isAdmin ? adminUnreadTotal() : 0;
     adminBtn.innerHTML =
-      unreadAdminMsgs > 0
-        ? `მართვა <span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:99px;font-size:10px;margin-left:4px;">${unreadAdminMsgs}</span>`
+      alerts > 0
+        ? `მართვა <span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:99px;font-size:10px;margin-left:4px;">${alerts}</span>`
         : 'მართვა';
   }
   if (heroAddBtn) heroAddBtn.classList.toggle('hidden', !isAdmin);
@@ -292,8 +294,8 @@ async function loadFromSupabase() {
 
     const isAdmin = Boolean(currentUser.isLoggedIn && currentUser.role === 'seller_admin');
 
-    if (prodRes.ok && Array.isArray(prodRes.data) && prodRes.data.length > 0) {
-      products = prodRes.data.map((r) => ({
+    if (prodRes.ok && Array.isArray(prodRes.data)) {
+      dbProducts = prodRes.data.map((r) => ({
         id: r.id,
         title: r.title,
         brand: r.brand,
@@ -309,7 +311,15 @@ async function loadFromSupabase() {
         rating: Number(r.rating || 4.9),
         reviewsCount: Number(r.reviews_count || 12),
         isNewArrival: r.is_new_arrival ?? true,
+        inStock: r.in_stock ?? true,
+        rawColor: r.color || '',
+        rawMaterial: r.material || '',
       }));
+    }
+
+    // Storefront shows only products marked "in stock"; keeps demo items if the DB is empty.
+    if (dbProducts.length > 0) {
+      products = dbProducts.filter((p) => p.inStock !== false);
       if (cart.length === 0 && products[0]) {
         cart = [{ product: products[0], size: products[0].sizes[0] || 'M', quantity: 1 }];
       }
@@ -325,10 +335,7 @@ async function loadFromSupabase() {
             playNotifChime();
             showToast(
               `🔔 ახალი შეკვეთა #${o.id} (${o.total} ₾) — დააჭირე სანახავად`,
-              () => {
-                renderAdminDrawer();
-                document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
-              },
+              () => openAdminPanel('orders', { order: o.id }),
               6000
             );
           }
@@ -343,26 +350,12 @@ async function loadFromSupabase() {
         msgRes.data.forEach((m) => {
           if (!seenMessageIds.has(m.id)) {
             if (isAdmin && m.sender === 'user') {
-              unreadAdminMsgs += 1;
-              updateBadges();
               playNotifChime();
               showToast(
-                `💬 ახალი მესიჯი მყიდველისგან: "${m.text}" — დააჭირე საპასუხოდ`,
-                () => {
-                  unreadAdminMsgs = 0;
-                  updateBadges();
-                  renderAdminDrawer();
-                  document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
-                },
+                `💬 ახალი მესიჯი: "${messageBody(m)}" — დააჭირე საპასუხოდ`,
+                () => openAdminPanel('chat', { thread: m.user_id }),
                 6000
               );
-              const admDrawer = document.getElementById('adminDrawerBackdrop');
-              if (admDrawer && !admDrawer.classList.contains('hidden')) {
-                const inpVal = document.getElementById('admChatReplyInp')?.value || '';
-                renderAdminDrawer();
-                const newInp = document.getElementById('admChatReplyInp');
-                if (newInp) newInp.value = inpVal;
-              }
             } else if (!isAdmin && m.sender === 'store') {
               playNotifChime();
               showToast(
@@ -380,6 +373,15 @@ async function loadFromSupabase() {
       msgRes.data.forEach((m) => seenMessageIds.add(m.id));
       chatMessages = msgRes.data;
       renderChatMessages();
+    }
+
+    if (isAdmin) {
+      const fingerprint = `${orders.map((o) => o.id + o.status).join()}|${chatMessages.length}|${dbProducts.length}`;
+      if (fingerprint !== lastAdminFingerprint) {
+        lastAdminFingerprint = fingerprint;
+        refreshAdminDrawerIfOpen();
+      }
+      updateBadges();
     }
 
     initialSyncDone = true;
@@ -791,235 +793,802 @@ window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
   showToast(`🎉 შეკვეთა #${orderId} გაფორმდა და ჩაიწერა Supabase ბაზაში!`);
 };
 
-// Admin & Add Product Studio Drawer
+// ===================== Admin panel =====================
+const ORDER_STATUSES = ['მუშავდება', 'გზაშია', 'ჩაბარებულია', 'გაუქმებულია'];
+const STATUS_CLASS = {
+  'მუშავდება': 'pending',
+  'გზაშია': 'shipping',
+  'ჩაბარებულია': 'done',
+  'გაუქმებულია': 'cancelled',
+};
+const CATEGORY_LABELS = { women: 'ქალი', men: 'მამაკაცი', shoes: 'ფეხსაცმელი', accessories: 'აქსესუარები' };
+const SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', 'ONE SIZE'];
+
+let adminTab = 'overview'; // overview | orders | products | chat
+let adminActiveThread = null;
+let adminOrderFilter = 'all';
+let adminOrderSearch = '';
+let adminExpandedOrder = null;
+let adminProductSearch = '';
+let adminProductCat = 'all';
+let adminEditingProduct = null; // null = list, 'new' or a product id = form
+let adminSeen = JSON.parse(localStorage.getItem('atelier_admin_seen') || '{}');
+
+function money(n) {
+  return `${Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ₾`;
+}
+
+function msgTime(m) {
+  const t = new Date(m.created_at || 0).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (d.toDateString() === new Date().toDateString()) return `დღეს, ${hm}`;
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()} ${hm}`;
+}
+
+// Customer messages are stored as "[Name] text"; show just the text.
+function messageBody(m) {
+  const prefix = m.sender_name ? `[${m.sender_name}] ` : '';
+  return prefix && m.text.startsWith(prefix) ? m.text.slice(prefix.length) : m.text;
+}
+
+function adminChatThreads() {
+  const byUser = new Map();
+  const ensure = (userId) => {
+    if (!byUser.has(userId)) {
+      byUser.set(userId, { userId, label: '', email: '', last: 0, lastText: '', unread: 0 });
+    }
+    return byUser.get(userId);
+  };
+  chatMessages.forEach((m) => {
+    if (!m.user_id) return;
+    const t = ensure(m.user_id);
+    const ts = msgTime(m);
+    if (m.sender === 'user' && m.sender_name) t.label = m.sender_name;
+    if (ts >= t.last) {
+      t.last = ts;
+      t.lastText = (m.sender === 'store' ? 'თქვენ: ' : '') + messageBody(m);
+    }
+    if (m.sender === 'user' && ts > (adminSeen[m.user_id] || 0)) t.unread += 1;
+  });
+  if (adminActiveThread && !byUser.has(adminActiveThread)) ensure(adminActiveThread);
+  orders.forEach((o) => {
+    if (o.user_id && o.user_email && byUser.has(o.user_id)) byUser.get(o.user_id).email = o.user_email;
+  });
+  byUser.forEach((t) => {
+    if (!t.label) t.label = t.email || 'მყიდველი';
+  });
+  return [...byUser.values()].sort((a, b) => b.last - a.last);
+}
+
+function adminUnreadTotal() {
+  return adminChatThreads().reduce((s, t) => s + t.unread, 0);
+}
+
+function markThreadSeen(userId) {
+  const latest = chatMessages
+    .filter((m) => m.user_id === userId)
+    .reduce((mx, m) => Math.max(mx, msgTime(m)), 0);
+  adminSeen[userId] = Math.max(Date.now(), latest);
+  localStorage.setItem('atelier_admin_seen', JSON.stringify(adminSeen));
+}
+
+window.openAdminPanel = function (tab, opts = {}) {
+  if (tab === 'products-new') {
+    adminTab = 'products';
+    adminEditingProduct = 'new';
+  } else if (tab) {
+    adminTab = tab;
+    if (tab !== 'products') adminEditingProduct = null;
+  }
+  if (opts.thread) adminActiveThread = opts.thread;
+  if (opts.order) {
+    adminExpandedOrder = opts.order;
+    adminOrderFilter = 'all';
+    adminOrderSearch = '';
+  }
+  document.getElementById('authDrawerBackdrop').classList.add('hidden');
+  renderAdminDrawer();
+  document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
+};
+
+window.setAdminTab = function (tab) {
+  adminTab = tab;
+  if (tab !== 'products') adminEditingProduct = null;
+  renderAdminDrawer();
+  document.getElementById('adminDrawerBody').scrollTop = 0;
+};
+
+// Re-render on new data without wiping what the admin is typing.
+function refreshAdminDrawerIfOpen() {
+  const backdrop = document.getElementById('adminDrawerBackdrop');
+  if (!backdrop || backdrop.classList.contains('hidden')) return;
+  if (adminTab === 'products' && adminEditingProduct) return;
+  const activeId = document.activeElement?.id;
+  const reply = document.getElementById('admChatReplyInp')?.value;
+  renderAdminDrawer();
+  const replyInp = document.getElementById('admChatReplyInp');
+  if (replyInp && reply) replyInp.value = reply;
+  const el = activeId && document.getElementById(activeId);
+  if (el) {
+    el.focus();
+    if (typeof el.value === 'string' && el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
+  }
+}
+
 function renderAdminDrawer() {
   const body = document.getElementById('adminDrawerBody');
-  const totalRev = orders.reduce((s, o) => s + Number(o.total || 0), 0);
-  const threads = adminChatThreads();
-  if (!adminActiveThread || !threads.some((t) => t.userId === adminActiveThread)) {
-    adminActiveThread = threads[0]?.userId || null;
+  if (adminTab === 'chat') {
+    const threads = adminChatThreads();
+    if (!adminActiveThread || !threads.some((t) => t.userId === adminActiveThread)) {
+      adminActiveThread = threads[0]?.userId || null;
+    }
+    if (adminActiveThread) markThreadSeen(adminActiveThread);
   }
-  const recentMessages = chatMessages.filter((m) => m.user_id && m.user_id === adminActiveThread).slice(-20);
+  const unread = adminUnreadTotal();
+  const pending = orders.filter((o) => o.status === 'მუშავდება').length;
+  const tabs = [
+    ['overview', 'მიმოხილვა', 0],
+    ['orders', 'შეკვეთები', pending],
+    ['products', 'პროდუქტები', 0],
+    ['chat', 'ჩატი', unread],
+  ];
+  const content = {
+    overview: adminOverviewHtml,
+    orders: adminOrdersHtml,
+    products: adminProductsHtml,
+    chat: adminChatHtml,
+  }[adminTab]();
 
   body.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
-      <div class="box-card" style="margin:0;text-align:center;">
-        <div style="font-size:18px;font-weight:700;">${totalRev} ₾</div>
-        <div style="font-size:11px;color:#71717a;">ბრუნვა</div>
-      </div>
-      <div class="box-card" style="margin:0;text-align:center;">
-        <div style="font-size:18px;font-weight:700;">${orders.length}</div>
-        <div style="font-size:11px;color:#71717a;">შეკვეთა</div>
-      </div>
-      <div class="box-card" style="margin:0;text-align:center;">
-        <div style="font-size:18px;font-weight:700;">${chatMessages.filter((m) => m.sender === 'user').length}</div>
-        <div style="font-size:11px;color:#71717a;">მესიჯი</div>
+    <nav class="adm-tabs">
+      ${tabs
+        .map(
+          ([id, label, count]) => `
+        <button class="adm-tab ${adminTab === id ? 'active' : ''}" onclick="setAdminTab('${id}')">
+          ${label}${count ? `<span class="adm-count">${count}</span>` : ''}
+        </button>`
+        )
+        .join('')}
+    </nav>
+    ${content}
+  `;
+
+  if (adminTab === 'orders') renderAdminOrdersList();
+  if (adminTab === 'products' && !adminEditingProduct) renderAdminProductsList();
+  if (adminTab === 'products' && adminEditingProduct) updatePfPreview();
+  if (adminTab === 'chat') {
+    const box = document.getElementById('admChatMessages');
+    if (box) box.scrollTop = box.scrollHeight;
+  }
+  updateBadges();
+}
+
+// ---------- Overview ----------
+function adminOverviewHtml() {
+  const active = orders.filter((o) => o.status !== 'გაუქმებულია');
+  const revenue = active.reduce((s, o) => s + Number(o.total || 0), 0);
+  const avg = active.length ? revenue / active.length : 0;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const today = active.filter((o) => new Date(o.created_at || 0) >= todayStart);
+  const todayRevenue = today.reduce((s, o) => s + Number(o.total || 0), 0);
+  const hidden = dbProducts.filter((p) => p.inStock === false).length;
+  const unread = adminUnreadTotal();
+
+  const sold = new Map();
+  active.forEach((o) =>
+    (Array.isArray(o.items) ? o.items : []).forEach((it) => {
+      const p = it.product || {};
+      const key = p.id || p.title;
+      if (!key) return;
+      const e = sold.get(key) || { title: p.title, image: (p.images || [])[0], qty: 0, revenue: 0 };
+      const q = Number(it.quantity || 1);
+      e.qty += q;
+      e.revenue += Number(p.price || 0) * q;
+      sold.set(key, e);
+    })
+  );
+  const top = [...sold.values()].sort((a, b) => b.qty - a.qty).slice(0, 5);
+
+  const kpi = (label, value, sub) => `
+    <div class="adm-kpi">
+      <div class="adm-kpi-label">${label}</div>
+      <div class="adm-kpi-value">${value}</div>
+      ${sub ? `<div class="adm-sub">${sub}</div>` : ''}
+    </div>`;
+
+  return `
+    <div class="adm-kpis">
+      ${kpi('ბრუნვა', money(revenue), `${active.length} შეკვეთა`)}
+      ${kpi('დღეს', money(todayRevenue), `${today.length} შეკვეთა`)}
+      ${kpi('საშუალო შეკვეთა', money(avg))}
+      ${kpi('პროდუქტები', dbProducts.length - hidden, hidden ? `${hidden} დამალული` : 'ყველა ჩანს')}
+    </div>
+
+    ${
+      unread
+        ? `<button class="adm-alert" onclick="setAdminTab('chat')">💬 ${unread} წაუკითხავი მესიჯი მყიდველებისგან <span>გახსნა →</span></button>`
+        : ''
+    }
+
+    <div class="box-card">
+      <h4 class="adm-h">შეკვეთები სტატუსის მიხედვით</h4>
+      <div class="adm-status-grid">
+        ${ORDER_STATUSES.map(
+          (st) => `
+          <button class="adm-status-cell" data-status="${st}" onclick="setAdminOrderFilter(this.dataset.status, true)">
+            <span class="adm-badge ${STATUS_CLASS[st]}">${st}</span>
+            <b>${orders.filter((o) => o.status === st).length}</b>
+          </button>`
+        ).join('')}
       </div>
     </div>
 
-    <!-- LIVE CUSTOMER CHAT INBOX FOR ADMIN -->
     <div class="box-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <h4 style="font-size:13.5px;font-weight:600;">მყიდველების მესიჯები (Live Chat)</h4>
-        <span style="font-size:11px;color:#10b981;font-weight:600;">● Cloud Synced</span>
+      <div class="adm-h-row">
+        <h4 class="adm-h">ბოლო შეკვეთები</h4>
+        <button class="adm-link" onclick="setAdminTab('orders')">ყველა →</button>
       </div>
       ${
-        threads.length > 1
-          ? `<select class="text-input" style="margin-bottom:10px;" onchange="selectAdminThread(this.value)">
-              ${threads
-                .map(
-                  (t) =>
-                    `<option value="${escapeHtml(t.userId)}" ${t.userId === adminActiveThread ? 'selected' : ''}>${escapeHtml(t.label)}</option>`
-                )
-                .join('')}
-            </select>`
-          : ''
-      }
-      <div style="max-height:190px;overflow-y:auto;background:#fff;border:1px solid #ebebea;border-radius:8px;padding:10px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px;">
-        ${
-          recentMessages.length === 0
-            ? `<div class="muted-text" style="margin:0;">მესიჯები ჯერ არ არის</div>`
-            : recentMessages
-                .map(
-                  (m) => `
-              <div style="align-self:${m.sender === 'store' ? 'flex-end' : 'flex-start'};max-width:85%;padding:7px 11px;border-radius:8px;font-size:12px;background:${m.sender === 'store' ? '#0f0f10' : '#f7f7f5'};color:${m.sender === 'store' ? '#fff' : '#0f0f10'};">
-                <div style="font-size:10px;opacity:0.7;margin-bottom:2px;font-weight:600;">
-                  ${m.sender === 'store' ? 'ATELIER (ადმინი)' : 'მყიდველი'} · ${escapeHtml(m.timestamp)}
-                </div>
-                <div>${escapeHtml(m.text)}</div>
-              </div>
-            `
-                )
-                .join('')
-        }
-      </div>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="admChatReplyInp" placeholder="მიწერეთ პასუხი მყიდველს..." class="text-input" style="margin:0;flex:1;" onkeydown="if(event.key==='Enter') sendAdminWebReply()" />
-        <button class="btn-primary" style="padding:8px 16px;" onclick="sendAdminWebReply()">პასუხი</button>
-      </div>
-    </div>
-
-    <div class="box-card">
-      <h4 style="font-size:13.5px;font-weight:600;margin-bottom:10px;">+ ახალი პროდუქტის დამატება</h4>
-      <input type="text" id="admTitle" placeholder="დასახელება (მაგ: ტყავის ქურთუკი)" class="text-input" />
-      <div class="form-row-2">
-        <input type="text" id="admBrand" value="ZARA STUDIO" placeholder="ბრენდი" class="text-input" />
-        <select id="admCat" class="text-input">
-          <option value="women">ქალი</option>
-          <option value="men">მამაკაცი</option>
-          <option value="shoes">ფეხსაცმელი</option>
-          <option value="accessories">აქსესუარები</option>
-        </select>
-      </div>
-      <div class="form-row-2">
-        <input type="number" id="admPrice" placeholder="ფასი (₾) *" class="text-input" />
-        <input type="number" id="admOldPrice" placeholder="ძველი ფასი (SALE)" class="text-input" />
-      </div>
-      <input type="text" id="admImg" value="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=80" placeholder="ფოტოს URL" class="text-input" />
-      <textarea id="admDesc" placeholder="აღწერა..." class="text-input" rows="2"></textarea>
-      <button class="btn-primary full-w" onclick="publishWebProduct()">კატალოგში გამოქვეყნება</button>
-    </div>
-
-    <div class="box-card">
-      <h4 style="font-size:13.5px;font-weight:600;margin-bottom:10px;">შემოსული შეკვეთების მართვა (${orders.length})</h4>
-      ${
-        orders.length === 0
-          ? `<div class="muted-text">შეკვეთები ჯერ არ არის</div>`
-          : orders
+        orders.length
+          ? orders
+              .slice(0, 5)
               .map(
                 (o) => `
-          <div style="background:#fff;padding:10px;border-radius:8px;border:1px solid #ebebea;margin-bottom:8px;font-size:12px;">
-            <div style="display:flex;justify-content:space-between;font-weight:600;">
-              <span>#${escapeHtml(o.id)} · ${escapeHtml(o.total)} ₾</span>
-              <span style="color:#059669;">${escapeHtml(o.status)}</span>
-            </div>
-            <div style="color:#71717a;margin:4px 0;">${escapeHtml(o.user_email || 'სტუმარი')} · ${escapeHtml(o.city)}, ${escapeHtml(o.address)} (${escapeHtml(o.payment_method)})</div>
-            <div style="display:flex;gap:6px;margin-top:6px;">
-              ${['მუშავდება', 'გზაშია', 'ჩაბარებულია']
-                .map(
-                  (st) => `
-                <button class="size-pill ${o.status === st ? 'active' : ''}" data-order-id="${escapeHtml(o.id)}" onclick="changeWebOrderStatus(this.dataset.orderId,'${st}')">${st}</button>
-              `
-                )
-                .join('')}
-            </div>
-          </div>
-        `
+          <button class="adm-row" data-id="${escapeHtml(o.id)}" onclick="openAdminPanel('orders', { order: this.dataset.id })">
+            <span><b>#${escapeHtml(o.id)}</b><span class="adm-sub"> · ${escapeHtml(o.user_email || 'სტუმარი')}</span></span>
+            <span class="adm-row-right">${money(o.total)} <span class="adm-badge ${STATUS_CLASS[o.status] || ''}">${escapeHtml(o.status)}</span></span>
+          </button>`
               )
               .join('')
+          : `<div class="adm-empty">შეკვეთები ჯერ არ არის</div>`
+      }
+    </div>
+
+    <div class="box-card">
+      <h4 class="adm-h">ყველაზე გაყიდვადი</h4>
+      ${
+        top.length
+          ? top
+              .map(
+                (t, i) => `
+          <div class="adm-row static">
+            <span class="adm-row-left"><span class="adm-rank">${i + 1}</span>${t.image ? `<img src="${escapeHtml(t.image)}" alt="" />` : ''}<span class="adm-ellipsis">${escapeHtml(t.title)}</span></span>
+            <span class="adm-row-right">${t.qty} ც · ${money(t.revenue)}</span>
+          </div>`
+              )
+              .join('')
+          : `<div class="adm-empty">გაყიდვები ჯერ არ არის</div>`
       }
     </div>
   `;
 }
 
-let adminActiveThread = null;
+// ---------- Orders ----------
+window.setAdminOrderFilter = function (status, openTab) {
+  adminOrderFilter = status;
+  if (openTab) setAdminTab('orders');
+  else renderAdminDrawer();
+};
 
-function adminChatThreads() {
-  const byUser = new Map();
-  chatMessages.forEach((m) => {
-    if (!m.user_id) return;
-    const t = byUser.get(m.user_id) || { userId: m.user_id, label: 'მყიდველი', last: 0 };
-    if (m.sender === 'user' && m.sender_name) t.label = m.sender_name;
-    t.last = Math.max(t.last, new Date(m.created_at || Date.now()).getTime());
-    byUser.set(m.user_id, t);
-  });
-  return [...byUser.values()].sort((a, b) => b.last - a.last);
+window.toggleAdminOrder = function (id) {
+  adminExpandedOrder = adminExpandedOrder === id ? null : id;
+  renderAdminOrdersList();
+};
+
+function adminOrdersHtml() {
+  return `
+    <input type="search" id="admOrderSearch" class="text-input" placeholder="ძებნა: ნომერი, ელ-ფოსტა, ქალაქი, მისამართი"
+      value="${escapeHtml(adminOrderSearch)}" oninput="adminOrderSearch = this.value; renderAdminOrdersList()" />
+    <div class="adm-pills">
+      ${['all', ...ORDER_STATUSES]
+        .map((st) => {
+          const count = st === 'all' ? orders.length : orders.filter((o) => o.status === st).length;
+          return `<button class="size-pill ${adminOrderFilter === st ? 'active' : ''}" data-status="${st}" onclick="setAdminOrderFilter(this.dataset.status)">${st === 'all' ? 'ყველა' : st} · ${count}</button>`;
+        })
+        .join('')}
+    </div>
+    <div id="admOrdersList"></div>
+  `;
 }
 
-window.selectAdminThread = function (userId) {
-  adminActiveThread = userId;
+function renderAdminOrdersList() {
+  const el = document.getElementById('admOrdersList');
+  if (!el) return;
+  const q = adminOrderSearch.trim().toLowerCase();
+  const list = orders.filter(
+    (o) =>
+      (adminOrderFilter === 'all' || o.status === adminOrderFilter) &&
+      (!q || [o.id, o.user_email, o.city, o.address].some((v) => String(v || '').toLowerCase().includes(q)))
+  );
+  el.innerHTML = list.length ? list.map(adminOrderCard).join('') : `<div class="adm-empty">შეკვეთები ვერ მოიძებნა</div>`;
+}
+
+function adminOrderCard(o) {
+  const open = adminExpandedOrder === o.id;
+  const id = escapeHtml(o.id);
+  const items = Array.isArray(o.items) ? o.items : [];
+  const qty = items.reduce((s, i) => s + Number(i.quantity || 1), 0);
+  return `
+    <div class="adm-order ${open ? 'open' : ''}">
+      <button class="adm-order-head" data-id="${id}" onclick="toggleAdminOrder(this.dataset.id)">
+        <span>
+          <span class="adm-order-id">#${id}</span>
+          <span class="adm-sub">${escapeHtml(formatDateTime(o.created_at) || o.date || '')} · ${escapeHtml(o.user_email || 'სტუმარი')} · ${qty} ნივთი</span>
+        </span>
+        <span class="adm-order-right">
+          <b>${money(o.total)}</b>
+          <span class="adm-badge ${STATUS_CLASS[o.status] || ''}">${escapeHtml(o.status)}</span>
+        </span>
+      </button>
+      ${
+        open
+          ? `
+      <div class="adm-order-body">
+        ${items
+          .map((it) => {
+            const p = it.product || {};
+            return `
+          <div class="adm-item">
+            ${p.images && p.images[0] ? `<img src="${escapeHtml(p.images[0])}" alt="" />` : '<span class="adm-item-ph"></span>'}
+            <span class="adm-item-info">
+              <span class="adm-ellipsis">${escapeHtml(p.title || 'პროდუქტი')}</span>
+              <span class="adm-sub">${escapeHtml(p.brand || '')} · ზომა ${escapeHtml(it.size || '-')}</span>
+            </span>
+            <span class="adm-item-price">${Number(it.quantity || 1)} × ${money(p.price)}</span>
+          </div>`;
+          })
+          .join('')}
+
+        <div class="adm-kv">
+          <span>მიწოდება</span><span>${escapeHtml(o.city || '')}, ${escapeHtml(o.address || '')}</span>
+          <span>გადახდა</span><span>${escapeHtml(o.payment_method || '-')}</span>
+          <span>ჯამი</span><span>${money(o.subtotal)}</span>
+          ${Number(o.discount) ? `<span>ფასდაკლება</span><span>−${money(o.discount)}</span>` : ''}
+          <span>მიწოდების ფასი</span><span>${money(o.delivery_fee)}</span>
+          <span><b>სულ</b></span><span><b>${money(o.total)}</b></span>
+        </div>
+
+        <div class="adm-sub" style="margin:12px 0 6px;">სტატუსის შეცვლა</div>
+        <div class="adm-pills">
+          ${ORDER_STATUSES.map(
+            (st) =>
+              `<button class="size-pill ${o.status === st ? 'active' : ''}" data-id="${id}" data-status="${st}" onclick="changeWebOrderStatus(this.dataset.id, this.dataset.status)">${st}</button>`
+          ).join('')}
+        </div>
+
+        <div class="adm-actions">
+          ${
+            o.user_id
+              ? `<button class="text-btn" data-uid="${escapeHtml(o.user_id)}" onclick="openAdminPanel('chat', { thread: this.dataset.uid })">💬 მიწერა მყიდველს</button>`
+              : ''
+          }
+          <button class="text-btn danger" data-id="${id}" onclick="deleteWebOrder(this.dataset.id)">შეკვეთის წაშლა</button>
+        </div>
+      </div>`
+          : ''
+      }
+    </div>
+  `;
+}
+
+window.changeWebOrderStatus = async function (ordId, status) {
+  const ord = orders.find((o) => o.id === ordId);
+  if (!ord || ord.status === status) return;
+  const prev = ord.status;
+  ord.status = status;
+  renderAdminDrawer();
+
+  const res = await sbFetch(`orders?id=eq.${encodeURIComponent(ordId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    ord.status = prev;
+    renderAdminDrawer();
+    showToast('სტატუსის შეცვლა ვერ მოხერხდა');
+    return;
+  }
+  showToast(`შეკვეთა #${ordId}: ${status}`);
+};
+
+window.deleteWebOrder = async function (ordId) {
+  if (!confirm(`წავშალო შეკვეთა #${ordId}? ამის დაბრუნება შეუძლებელია.`)) return;
+  const res = await sbFetch(`orders?id=eq.${encodeURIComponent(ordId)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    showToast('შეკვეთის წაშლა ვერ მოხერხდა');
+    return;
+  }
+  orders = orders.filter((o) => o.id !== ordId);
+  adminExpandedOrder = null;
+  renderAdminDrawer();
+  showToast(`შეკვეთა #${ordId} წაიშალა`);
+};
+
+// ---------- Products ----------
+window.setAdminProductCat = function (cat) {
+  adminProductCat = cat;
   renderAdminDrawer();
 };
 
-window.sendAdminWebReply = async function () {
-  const inp = document.getElementById('admChatReplyInp');
-  if (!inp || !inp.value.trim()) return;
-  if (!adminActiveThread) {
-    showToast('ჯერ არცერთ მყიდველს არ მოუწერია');
+window.editAdminProduct = function (id) {
+  adminEditingProduct = id;
+  renderAdminDrawer();
+  document.getElementById('adminDrawerBody').scrollTop = 0;
+};
+
+function adminProductsHtml() {
+  if (adminEditingProduct) return adminProductFormHtml();
+  return `
+    <div class="adm-toolbar">
+      <input type="search" id="admProductSearch" class="text-input" placeholder="ძებნა: დასახელება, ბრენდი"
+        value="${escapeHtml(adminProductSearch)}" oninput="adminProductSearch = this.value; renderAdminProductsList()" />
+      <button class="btn-primary" onclick="editAdminProduct('new')">+ ახალი</button>
+    </div>
+    <div class="adm-pills">
+      ${['all', ...Object.keys(CATEGORY_LABELS)]
+        .map((c) => {
+          const count = c === 'all' ? dbProducts.length : dbProducts.filter((p) => p.category === c).length;
+          return `<button class="size-pill ${adminProductCat === c ? 'active' : ''}" data-cat="${c}" onclick="setAdminProductCat(this.dataset.cat)">${c === 'all' ? 'ყველა' : CATEGORY_LABELS[c]} · ${count}</button>`;
+        })
+        .join('')}
+    </div>
+    <div id="admProductsList"></div>
+  `;
+}
+
+function renderAdminProductsList() {
+  const el = document.getElementById('admProductsList');
+  if (!el) return;
+  const q = adminProductSearch.trim().toLowerCase();
+  const list = dbProducts.filter(
+    (p) =>
+      (adminProductCat === 'all' || p.category === adminProductCat) &&
+      (!q || `${p.title} ${p.brand}`.toLowerCase().includes(q))
+  );
+  el.innerHTML = list.length
+    ? list
+        .map((p) => {
+          const id = escapeHtml(p.id);
+          return `
+      <div class="adm-prod ${p.inStock === false ? 'is-hidden' : ''}">
+        ${p.images[0] ? `<img src="${escapeHtml(p.images[0])}" alt="" />` : '<span class="adm-item-ph"></span>'}
+        <div class="adm-prod-info">
+          <div class="adm-ellipsis"><b>${escapeHtml(p.title)}</b></div>
+          <div class="adm-sub">${escapeHtml(p.brand)} · ${CATEGORY_LABELS[p.category] || escapeHtml(p.category)} · ${escapeHtml(p.sizes.join(', '))}</div>
+          <div class="adm-prod-price">${money(p.price)} ${p.originalPrice && p.originalPrice > p.price ? `<s>${money(p.originalPrice)}</s>` : ''}</div>
+        </div>
+        <div class="adm-prod-actions">
+          <label class="adm-switch">
+            <input type="checkbox" ${p.inStock !== false ? 'checked' : ''} data-id="${id}" onchange="toggleProductStock(this.dataset.id, this.checked)" />
+            <span>${p.inStock !== false ? 'ჩანს' : 'დამალული'}</span>
+          </label>
+          <button class="text-btn" data-id="${id}" onclick="editAdminProduct(this.dataset.id)">შეცვლა</button>
+          <button class="text-btn danger" data-id="${id}" onclick="deleteWebProduct(this.dataset.id)">წაშლა</button>
+        </div>
+      </div>`;
+        })
+        .join('')
+    : `<div class="adm-empty">${dbProducts.length ? 'პროდუქტი ვერ მოიძებნა' : 'ბაზაში პროდუქტები ჯერ არ არის — დაამატეთ პირველი'}</div>`;
+}
+
+function adminProductFormHtml() {
+  const isNew = adminEditingProduct === 'new';
+  const p = isNew
+    ? {
+        title: '',
+        brand: 'ATELIER',
+        category: 'women',
+        price: '',
+        originalPrice: '',
+        sizes: ['XS', 'S', 'M', 'L'],
+        images: [],
+        description: '',
+        rawColor: '',
+        rawMaterial: '',
+        condition: 'ახალი (იარლიყით)',
+        isNewArrival: true,
+        inStock: true,
+      }
+    : dbProducts.find((x) => x.id === adminEditingProduct);
+  if (!p) {
+    adminEditingProduct = null;
+    return adminProductsHtml();
+  }
+  const sizes = [...new Set([...SIZE_OPTIONS, ...p.sizes])];
+
+  return `
+    <button class="adm-link" onclick="editAdminProduct(null)">← პროდუქტების სია</button>
+    <h4 class="adm-title">${isNew ? 'ახალი პროდუქტი' : 'პროდუქტის რედაქტირება'}</h4>
+
+    <div class="box-card">
+      <label class="field-label">დასახელება *</label>
+      <input type="text" id="pfTitle" class="text-input" value="${escapeHtml(p.title)}" placeholder="მაგ: ტყავის ქურთუკი" />
+
+      <div class="form-row-2">
+        <div>
+          <label class="field-label">ბრენდი</label>
+          <input type="text" id="pfBrand" class="text-input" value="${escapeHtml(p.brand)}" />
+        </div>
+        <div>
+          <label class="field-label">კატეგორია</label>
+          <select id="pfCat" class="text-input">
+            ${Object.entries(CATEGORY_LABELS)
+              .map(([v, l]) => `<option value="${v}" ${p.category === v ? 'selected' : ''}>${l}</option>`)
+              .join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row-2">
+        <div>
+          <label class="field-label">ფასი (₾) *</label>
+          <input type="number" id="pfPrice" class="text-input" min="0" step="0.01" value="${escapeHtml(p.price)}" />
+        </div>
+        <div>
+          <label class="field-label">ძველი ფასი (ფასდაკლებისთვის)</label>
+          <input type="number" id="pfOldPrice" class="text-input" min="0" step="0.01" value="${escapeHtml(p.originalPrice || '')}" />
+        </div>
+      </div>
+
+      <label class="field-label">ზომები * <span class="adm-sub">(დააჭირეთ ასარჩევად)</span></label>
+      <div class="adm-pills" id="pfSizes">
+        ${sizes
+          .map(
+            (s) =>
+              `<button type="button" class="size-pill ${p.sizes.includes(s) ? 'active' : ''}" data-size="${escapeHtml(s)}" onclick="this.classList.toggle('active')">${escapeHtml(s)}</button>`
+          )
+          .join('')}
+      </div>
+    </div>
+
+    <div class="box-card">
+      <label class="field-label">ფოტოების ბმულები * <span class="adm-sub">(თითო ბმული ახალ ხაზზე, პირველი მთავარია)</span></label>
+      <textarea id="pfImages" class="text-input" rows="3" placeholder="https://..." oninput="updatePfPreview()">${escapeHtml(p.images.join('\n'))}</textarea>
+      <div class="adm-img-preview" id="pfPreview"></div>
+    </div>
+
+    <div class="box-card">
+      <div class="form-row-2">
+        <div>
+          <label class="field-label">ფერი</label>
+          <input type="text" id="pfColor" class="text-input" value="${escapeHtml(p.rawColor)}" placeholder="მაგ: შავი" />
+        </div>
+        <div>
+          <label class="field-label">მასალა</label>
+          <input type="text" id="pfMaterial" class="text-input" value="${escapeHtml(p.rawMaterial)}" placeholder="მაგ: 100% ბამბა" />
+        </div>
+      </div>
+      <label class="field-label">მდგომარეობა</label>
+      <input type="text" id="pfCondition" class="text-input" value="${escapeHtml(p.condition)}" />
+      <label class="field-label">აღწერა</label>
+      <textarea id="pfDesc" class="text-input" rows="3">${escapeHtml(p.description)}</textarea>
+
+      <label class="adm-check"><input type="checkbox" id="pfNew" ${p.isNewArrival ? 'checked' : ''} /> ახალი კოლექცია</label>
+      <label class="adm-check"><input type="checkbox" id="pfStock" ${p.inStock !== false ? 'checked' : ''} /> მარაგშია (ჩანს კატალოგში)</label>
+    </div>
+
+    <div class="adm-actions end">
+      <button class="btn-secondary" onclick="editAdminProduct(null)">გაუქმება</button>
+      <button class="btn-primary" id="pfSaveBtn" onclick="saveAdminProduct()">${isNew ? 'გამოქვეყნება' : 'ცვლილებების შენახვა'}</button>
+    </div>
+  `;
+}
+
+window.updatePfPreview = function () {
+  const box = document.getElementById('pfPreview');
+  const inp = document.getElementById('pfImages');
+  if (!box || !inp) return;
+  box.innerHTML = inp.value
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => /^https?:\/\//i.test(s))
+    .map((u) => `<img src="${escapeHtml(u)}" alt="" onerror="this.classList.add('broken')" />`)
+    .join('');
+};
+
+window.saveAdminProduct = async function () {
+  const val = (id) => document.getElementById(id).value.trim();
+  const title = val('pfTitle');
+  const price = Number(val('pfPrice'));
+  const oldPrice = Number(val('pfOldPrice'));
+  const images = val('pfImages')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const sizes = [...document.querySelectorAll('#pfSizes .size-pill.active')].map((b) => b.dataset.size);
+
+  if (!title) return showToast('შეიყვანეთ დასახელება');
+  if (!(price > 0)) return showToast('შეიყვანეთ სწორი ფასი');
+  if (!sizes.length) return showToast('აირჩიეთ მინიმუმ ერთი ზომა');
+  if (!images.length) return showToast('დაამატეთ მინიმუმ ერთი ფოტოს ბმული');
+  if (images.some((u) => !/^https?:\/\//i.test(u))) return showToast('ფოტოს ბმული უნდა იწყებოდეს https://-ით');
+
+  const row = {
+    title,
+    brand: val('pfBrand') || 'ATELIER',
+    category: val('pfCat'),
+    price,
+    original_price: oldPrice > price ? oldPrice : null,
+    sizes,
+    images,
+    color: val('pfColor') || null,
+    material: val('pfMaterial') || null,
+    condition: val('pfCondition') || 'ახალი (იარლიყით)',
+    description: val('pfDesc'),
+    is_new_arrival: document.getElementById('pfNew').checked,
+    in_stock: document.getElementById('pfStock').checked,
+  };
+
+  const btn = document.getElementById('pfSaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'ინახება...';
+
+  const isNew = adminEditingProduct === 'new';
+  const res = isNew
+    ? await sbFetch('products', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...row,
+          id: 'prod-' + Date.now(),
+          seller_name: 'ATELIER Official Store',
+          rating: 5.0,
+          reviews_count: 1,
+        }),
+      })
+    : await sbFetch(`products?id=eq.${encodeURIComponent(adminEditingProduct)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(row),
+      });
+
+  if (!res.ok) {
+    btn.disabled = false;
+    btn.textContent = isNew ? 'გამოქვეყნება' : 'ცვლილებების შენახვა';
+    showToast('შენახვა ვერ მოხერხდა: ' + (res.data?.message || res.status));
     return;
   }
+
+  adminEditingProduct = null;
+  await loadFromSupabase();
+  renderAdminDrawer();
+  showToast(isNew ? 'პროდუქტი გამოქვეყნდა ✨' : 'ცვლილებები შენახულია');
+};
+
+window.toggleProductStock = async function (id, inStock) {
+  const res = await sbFetch(`products?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ in_stock: inStock }),
+  });
+  if (!res.ok) {
+    showToast('ცვლილება ვერ შეინახა');
+    renderAdminDrawer();
+    return;
+  }
+  await loadFromSupabase();
+  renderAdminDrawer();
+  showToast(inStock ? 'პროდუქტი კატალოგში გამოჩნდა' : 'პროდუქტი კატალოგიდან დაიმალა');
+};
+
+window.deleteWebProduct = async function (id) {
+  const p = dbProducts.find((x) => x.id === id);
+  if (!confirm(`წავშალო "${p ? p.title : id}"? ამის დაბრუნება შეუძლებელია.\n\nთუ მხოლოდ დროებით გინდათ დამალვა, გამოიყენეთ "ჩანს" გადამრთველი.`)) return;
+  const res = await sbFetch(`products?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    showToast('წაშლა ვერ მოხერხდა');
+    return;
+  }
+  await loadFromSupabase();
+  renderAdminDrawer();
+  showToast('პროდუქტი წაიშალა');
+};
+
+// ---------- Chat ----------
+window.openAdminThread = function (userId) {
+  adminActiveThread = userId;
+  renderAdminDrawer();
+  document.getElementById('admChatReplyInp')?.focus();
+};
+
+function adminChatHtml() {
+  const threads = adminChatThreads();
+  const active = threads.find((t) => t.userId === adminActiveThread);
+  const msgs = chatMessages.filter((m) => m.user_id && m.user_id === adminActiveThread);
+
+  return `
+    <div class="adm-chat">
+      <div class="adm-threads">
+        ${
+          threads.length
+            ? threads
+                .map(
+                  (t) => `
+          <button class="adm-thread ${t.userId === adminActiveThread ? 'active' : ''}" data-uid="${escapeHtml(t.userId)}" onclick="openAdminThread(this.dataset.uid)">
+            <span class="adm-thread-top">
+              <b class="adm-ellipsis">${escapeHtml(t.label)}</b>
+              ${t.unread ? `<span class="adm-count">${t.unread}</span>` : ''}
+            </span>
+            <span class="adm-thread-last">${escapeHtml(t.lastText || 'ახალი მიმოწერა')}</span>
+            <span class="adm-sub">${escapeHtml(t.last ? formatDateTime(t.last) : '')}</span>
+          </button>`
+                )
+                .join('')
+            : `<div class="adm-empty">მესიჯები ჯერ არ არის</div>`
+        }
+      </div>
+      <div class="adm-conv">
+        ${
+          active
+            ? `
+          <div class="adm-conv-head">
+            <b>${escapeHtml(active.label)}</b>
+            ${active.email && active.email !== active.label ? `<span class="adm-sub">${escapeHtml(active.email)}</span>` : ''}
+          </div>
+          <div class="adm-conv-msgs" id="admChatMessages">
+            ${
+              msgs.length
+                ? msgs
+                    .map(
+                      (m) => `
+              <div class="adm-msg ${m.sender === 'store' ? 'store' : 'user'}">
+                <div>${escapeHtml(messageBody(m))}</div>
+                <div class="adm-msg-time">${escapeHtml(formatDateTime(m.created_at) || m.timestamp || '')}</div>
+              </div>`
+                    )
+                    .join('')
+                : `<div class="adm-empty">მიმოწერა ჯერ არ არის — დაწერეთ პირველი მესიჯი</div>`
+            }
+          </div>
+          <div class="adm-reply">
+            <input type="text" id="admChatReplyInp" class="text-input" placeholder="დაწერეთ პასუხი..." onkeydown="if(event.key==='Enter') sendAdminWebReply()" />
+            <button class="btn-primary" onclick="sendAdminWebReply()">გაგზავნა</button>
+          </div>`
+            : `<div class="adm-empty">აირჩიეთ მიმოწერა მარცხნივ</div>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+window.sendAdminWebReply = async function () {
+  const inp = document.getElementById('admChatReplyInp');
+  if (!inp || !inp.value.trim() || !adminActiveThread) return;
   const text = inp.value.trim();
   inp.value = '';
 
   const now = new Date();
-  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const replyObj = {
     id: 'msg-admin-' + Date.now(),
     thread_id: 'thread-' + adminActiveThread,
     user_id: adminActiveThread,
     sender: 'store',
     text,
-    timestamp: timeStr,
+    timestamp: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
     product_ref: null,
   };
 
-  chatMessages.push(replyObj);
-  renderChatMessages();
+  chatMessages.push({ ...replyObj, created_at: now.toISOString() });
+  seenMessageIds.add(replyObj.id);
   renderAdminDrawer();
+  document.getElementById('admChatReplyInp')?.focus();
 
-  await sbFetch('messages', {
+  const res = await sbFetch('messages', {
     method: 'POST',
     body: JSON.stringify(replyObj),
   });
-  showToast('პასუხი გაიგზავნა მყიდველთან');
-};
-
-window.publishWebProduct = async function () {
-  const title = document.getElementById('admTitle').value.trim();
-  const brand = document.getElementById('admBrand').value.trim() || 'ATELIER';
-  const category = document.getElementById('admCat').value;
-  const price = Number(document.getElementById('admPrice').value);
-  const orig = Number(document.getElementById('admOldPrice').value);
-  const img = document.getElementById('admImg').value.trim();
-  const desc = document.getElementById('admDesc').value.trim() || 'პრემიუმ მოდელი ახალი კოლექციიდან.';
-
-  if (!title || !price) {
-    showToast('გთხოვთ შეავსოთ დასახელება და ფასი');
-    return;
+  if (!res.ok) {
+    chatMessages = chatMessages.filter((m) => m.id !== replyObj.id);
+    renderAdminDrawer();
+    const again = document.getElementById('admChatReplyInp');
+    if (again) again.value = text;
+    showToast('მესიჯი ვერ გაიგზავნა, სცადეთ თავიდან');
   }
-
-  const newId = 'prod-' + Date.now();
-  const dbRow = {
-    id: newId,
-    title,
-    brand,
-    price,
-    original_price: orig > price ? orig : null,
-    category,
-    sizes: category === 'shoes' ? ['38', '39', '40', '41', '42'] : ['XS', 'S', 'M', 'L'],
-    condition: 'ახალი (იარლიყით)',
-    images: [img],
-    description: desc,
-    color: 'შავი',
-    material: 'პრემიუმ ქსოვილი',
-    seller_name: 'ATELIER Official Store',
-    in_stock: true,
-    is_new_arrival: true,
-    rating: 5.0,
-    reviews_count: 1,
-  };
-
-  await sbFetch('products', {
-    method: 'POST',
-    body: JSON.stringify(dbRow),
-  });
-
-  await loadFromSupabase();
-  renderAdminDrawer();
-  showToast('პროდუქტი გამოქვეყნდა ვებ-საიტზე და iOS აპლიკაციაში! ✨');
-};
-
-window.changeWebOrderStatus = async function (ordId, status) {
-  const ord = orders.find((o) => o.id === ordId);
-  if (ord) ord.status = status;
-  renderAdminDrawer();
-
-  await sbFetch(`orders?id=eq.${encodeURIComponent(ordId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  });
-
-  showToast(`შეკვეთა #${ordId} სტატუსი განახლდა: ${status}`);
 };
 
 let webAuthTab = 'login'; // 'login' | 'register'
@@ -1051,7 +1620,7 @@ function renderAuthDrawer() {
       ${
         isAdmin
           ? `
-        <button class="btn-primary full-w" style="margin-bottom:14px;" onclick="document.getElementById('authDrawerBackdrop').classList.add('hidden'); renderAdminDrawer(); document.getElementById('adminDrawerBackdrop').classList.remove('hidden');">
+        <button class="btn-primary full-w" style="margin-bottom:14px;" onclick="openAdminPanel('overview')">
           მაღაზიის მართვის პანელი
         </button>
       `
@@ -1175,12 +1744,14 @@ function logoutLocal() {
   seenOrderIds = new Set();
   seenMessageIds = new Set();
   initialSyncDone = false;
+  lastAdminFingerprint = '';
   saveLocalState();
 }
 
 window.handleWebLogout = async function () {
   const token = authSession?.access_token;
   logoutLocal();
+  document.getElementById('adminDrawerBackdrop').classList.add('hidden');
   renderAuthDrawer();
   renderChatMessages();
   showToast('გამოხვედით ანგარიშიდან');
@@ -1312,8 +1883,7 @@ async function sendChatMessage(textOverride) {
   if (isAdmin) {
     // Admin replies go to a specific customer's thread from the admin panel
     if (!textOverride) inp.value = rawText;
-    renderAdminDrawer();
-    document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
+    openAdminPanel('chat');
     return;
   }
   const text = `[${currentUser.name}] ${rawText}`;
@@ -1398,12 +1968,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('heroShopSaleBtn').addEventListener('click', () => {
     document.getElementById('catalogAnchor').scrollIntoView({ behavior: 'smooth' });
   });
-  document.getElementById('heroAddProdBtn').addEventListener('click', () => {
-    unreadAdminMsgs = 0;
-    updateBadges();
-    renderAdminDrawer();
-    document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
-  });
+  document.getElementById('heroAddProdBtn').addEventListener('click', () => openAdminPanel('products-new'));
 
   // Modals & Drawers
   document.getElementById('closeProductModal').addEventListener('click', () => {
@@ -1444,12 +2009,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('cartDrawerBackdrop').classList.add('hidden');
   });
 
-  document.getElementById('openAdminBtn').addEventListener('click', () => {
-    unreadAdminMsgs = 0;
-    updateBadges();
-    renderAdminDrawer();
-    document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
-  });
+  document.getElementById('openAdminBtn').addEventListener('click', () =>
+    openAdminPanel(adminUnreadTotal() > 0 ? 'chat' : null)
+  );
   document.getElementById('closeAdminDrawer').addEventListener('click', () => {
     document.getElementById('adminDrawerBackdrop').classList.add('hidden');
   });
