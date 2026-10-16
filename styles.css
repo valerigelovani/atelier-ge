@@ -2196,3 +2196,20 @@ body {
     animation: none;
   }
 }
+
+/* Read receipts */
+.chat-read,
+.adm-read {
+  align-self: flex-end;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: -2px;
+}
+.chat-read {
+  text-align: right;
+  padding: 0 4px;
+}
+.chat-read.seen,
+.adm-read.seen {
+  color: var(--text);
+}

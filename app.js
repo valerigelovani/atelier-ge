@@ -393,7 +393,8 @@ async function loadFromSupabase() {
     }
 
     if (isAdmin) {
-      const fingerprint = `${orders.map((o) => o.id + o.status).join()}|${chatMessages.length}|${dbProducts.length}`;
+      const seen = chatMessages.filter((m) => m.read_at).length;
+      const fingerprint = `${orders.map((o) => o.id + o.status).join()}|${chatMessages.length}|${seen}|${dbProducts.length}`;
       if (fingerprint !== lastAdminFingerprint) {
         lastAdminFingerprint = fingerprint;
         refreshAdminDrawerIfOpen();
@@ -1083,7 +1084,8 @@ function adminChatThreads() {
       t.last = ts;
       t.lastText = (m.sender === 'store' ? 'თქვენ: ' : '') + messageBody(m);
     }
-    if (m.sender === 'user' && ts > (adminSeen[m.user_id] || 0)) t.unread += 1;
+    const unread = hasReadColumn() ? !m.read_at : ts > (adminSeen[m.user_id] || 0);
+    if (m.sender === 'user' && unread) t.unread += 1;
   });
   if (adminActiveThread && !byUser.has(adminActiveThread)) ensure(adminActiveThread);
   orders.forEach((o) => {
@@ -1093,6 +1095,46 @@ function adminChatThreads() {
     if (!t.label) t.label = t.email || 'მყიდველი';
   });
   return [...byUser.values()].sort((a, b) => b.last - a.last);
+}
+
+// ---- Read receipts: messages.read_at (supabase/007_read_receipts.sql) ----
+// Until that column exists, unread counts fall back to per-browser tracking.
+function hasReadColumn() {
+  return chatMessages.some((m) => 'read_at' in m);
+}
+
+const markingRead = new Set();
+async function markMessagesRead(list) {
+  if (!hasReadColumn() || document.visibilityState !== 'visible') return;
+  const pending = list.filter((m) => !m.read_at && !markingRead.has(m.id));
+  if (!pending.length) return;
+  const now = new Date().toISOString();
+  pending.forEach((m) => {
+    markingRead.add(m.id);
+    m.read_at = now; // optimistic; the next poll brings the server value
+  });
+  const ids = pending.map((m) => `"${String(m.id).replace(/"/g, '')}"`).join(',');
+  await sbFetch(`messages?id=in.(${encodeURIComponent(ids)})`, {
+    method: 'PATCH',
+    body: JSON.stringify({ read_at: now }),
+  }).catch(() => null);
+  pending.forEach((m) => markingRead.delete(m.id));
+}
+
+// "✓ გაგზავნილია" / "✓✓ ნანახია" under the last message I sent
+function readStatusHtml(msgs, mySender, cls) {
+  if (!hasReadColumn()) return '';
+  let last = null;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].sender === mySender) {
+      last = msgs[i];
+      break;
+    }
+  }
+  if (!last || msgs[msgs.length - 1] !== last) return '';
+  return last.read_at
+    ? `<div class="${cls} seen">✓✓ ნანახია · ${escapeHtml(formatDateTime(last.read_at))}</div>`
+    : `<div class="${cls}">✓ გაგზავნილია</div>`;
 }
 
 function adminUnreadTotal() {
@@ -1105,6 +1147,7 @@ function markThreadSeen(userId) {
     .reduce((mx, m) => Math.max(mx, msgTime(m)), 0);
   adminSeen[userId] = Math.max(Date.now(), latest);
   localStorage.setItem('atelier_admin_seen', JSON.stringify(adminSeen));
+  markMessagesRead(chatMessages.filter((m) => m.user_id === userId && m.sender === 'user'));
 }
 
 window.openAdminPanel = function (tab, opts = {}) {
@@ -2007,7 +2050,7 @@ function adminChatHtml() {
                 <div class="adm-msg-time">${escapeHtml(formatDateTime(m.created_at) || m.timestamp || '')}</div>
               </div>`
                     )
-                    .join('')
+                    .join('') + readStatusHtml(msgs, 'store', 'adm-read')
                 : `<div class="adm-empty">მიმოწერა ჯერ არ არის — დაწერეთ პირველი მესიჯი</div>`
             }
           </div>
@@ -2315,6 +2358,7 @@ let guestInfo = JSON.parse(localStorage.getItem('atelier_guest_info') || 'null')
 function renderChatMessages() {
   const list = document.getElementById('chatMessagesList');
   if (!list) return;
+  const isStoreAdmin = currentUser.isLoggedIn && currentUser.role === 'seller_admin';
 
   // Guests leave a name (and optionally a phone) with their first message
   const guestRow = document.getElementById('chatGuestRow');
@@ -2342,8 +2386,12 @@ function renderChatMessages() {
     </div>
   `
     )
-    .join('');
+    .join('') + (isStoreAdmin ? '' : readStatusHtml(chatMessages, 'user', 'chat-read'));
   list.scrollTop = list.scrollHeight;
+
+  // The customer has the chat open: the store's replies count as seen
+  const open = !document.getElementById('chatWindow').classList.contains('hidden');
+  if (open && !isStoreAdmin) markMessagesRead(chatMessages.filter((m) => m.sender === 'store'));
 }
 
 async function sendChatMessage(textOverride) {
@@ -2535,6 +2583,12 @@ document.addEventListener('DOMContentLoaded', () => {
     filterState.category = 'all';
     showToast(`ფავორიტებში გაქვთ ${favorites.length} მოდელი ❤️`);
     document.getElementById('catalogAnchor').scrollIntoView({ behavior: 'smooth' });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    renderChatMessages();
+    refreshAdminDrawerIfOpen();
   });
 
   // Chat Widget
