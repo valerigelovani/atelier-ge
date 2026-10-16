@@ -291,6 +291,7 @@ body {
 /* Catalog Section */
 .catalog-section {
   padding: 40px 0 72px;
+  scroll-margin-top: 50px; /* sticky header */
 }
 
 .catalog-toolbar {
@@ -2076,5 +2077,12 @@ body {
   }
   .pm-arrow {
     display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .catalog-section {
+    padding-top: 28px;
+    scroll-margin-top: 90px;
   }
 }
