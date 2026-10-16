@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 3000;
+const ROOT = __dirname;
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -14,9 +15,29 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-  let filePath = req.url.split('?')[0];
+  let filePath;
+  try {
+    filePath = decodeURIComponent(req.url.split('?')[0]);
+  } catch (e) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('400 Bad Request');
+    return;
+  }
   if (filePath === '/') filePath = '/index.html';
-  const fullPath = path.join(__dirname, filePath);
+  const fullPath = path.resolve(ROOT, '.' + filePath);
+
+  // Only serve files inside the project folder and never dotfiles (.git, .env, ...)
+  const relPath = path.relative(ROOT, fullPath);
+  if (
+    relPath.startsWith('..') ||
+    path.isAbsolute(relPath) ||
+    relPath.split(path.sep).some((part) => part.startsWith('.')) ||
+    !MIME_TYPES[path.extname(fullPath)]
+  ) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('404 Not Found');
+    return;
+  }
 
   fs.readFile(fullPath, (err, content) => {
     if (err) {
@@ -25,7 +46,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     const ext = path.extname(fullPath);
-    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'text/plain; charset=utf-8' });
+    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] });
     res.end(content);
   });
 });

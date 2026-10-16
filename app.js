@@ -100,20 +100,89 @@ let reviews = JSON.parse(
 );
 
 localStorage.removeItem('atelier_web_user');
-let currentUser = JSON.parse(
-  localStorage.getItem('atelier_web_user_v2') ||
-    JSON.stringify({
-      name: '',
-      email: '',
-      phone: '',
-      city: 'თბილისი',
-      address: '',
-      role: 'customer',
-      isLoggedIn: false,
-    })
-);
+let currentUser = JSON.parse(localStorage.getItem('atelier_web_user_v2') || 'null') || {
+  name: '',
+  email: '',
+  phone: '',
+  city: 'თბილისი',
+  address: '',
+  role: 'customer',
+  isLoggedIn: false,
+};
 
-const ADMIN_EMAILS = ['valeri@atelier.ge', 'valeri.gelovani@yahoo.com', 'admin@atelier.ge'];
+// Supabase Auth session (access/refresh tokens). Admin rights are decided by the
+// database (public.is_admin() + RLS), never by anything stored in the browser.
+let authSession = JSON.parse(localStorage.getItem('atelier_auth_session') || 'null');
+
+function saveAuthSession(data) {
+  authSession = data
+    ? {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+        user: { id: data.user?.id, email: data.user?.email },
+      }
+    : null;
+  if (authSession) localStorage.setItem('atelier_auth_session', JSON.stringify(authSession));
+  else localStorage.removeItem('atelier_auth_session');
+}
+
+async function authRequest(path, body, token) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch (e) {}
+  return { ok: res.ok, status: res.status, data };
+}
+
+let refreshPromise = null;
+async function getAccessToken() {
+  if (!authSession) return null;
+  if (authSession.expires_at - 60 > Date.now() / 1000) return authSession.access_token;
+  if (!refreshPromise) {
+    refreshPromise = authRequest('token?grant_type=refresh_token', {
+      refresh_token: authSession.refresh_token,
+    })
+      .then((r) => {
+        if (r.ok && r.data?.access_token) saveAuthSession(r.data);
+        else if (r.status >= 400 && r.status < 500) logoutLocal();
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  await refreshPromise;
+  return authSession ? authSession.access_token : null;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const EMPTY_USER = {
+  name: '',
+  email: '',
+  phone: '',
+  city: 'თბილისი',
+  address: '',
+  role: 'customer',
+  isLoggedIn: false,
+};
 
 let filterState = {
   category: 'all',
@@ -125,16 +194,22 @@ let filterState = {
 
 // Supabase REST helper
 async function sbFetch(path, options = {}) {
+  const token = await getAccessToken();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...options,
     headers: {
       apikey: SUPABASE_KEY,
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
   const text = await res.text();
-  return { ok: res.ok, status: res.status, data: text ? JSON.parse(text) : null };
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch (e) {}
+  return { ok: res.ok, status: res.status, data };
 }
 
 let seenMessageIds = new Set();
@@ -207,10 +282,12 @@ function updateBadges() {
 // Load live data from Supabase
 async function loadFromSupabase() {
   try {
+    const loggedIn = Boolean(authSession && currentUser.isLoggedIn);
+    const empty = Promise.resolve({ ok: true, data: [] });
     const [prodRes, ordRes, msgRes] = await Promise.all([
       sbFetch('products?select=*&order=created_at.desc'),
-      sbFetch('orders?select=*&order=created_at.desc'),
-      sbFetch('messages?select=*&order=created_at.asc'),
+      loggedIn ? sbFetch('orders?select=*&order=created_at.desc') : empty,
+      loggedIn ? sbFetch('messages?select=*&order=created_at.asc') : empty,
     ]);
 
     const isAdmin = Boolean(currentUser.isLoggedIn && currentUser.role === 'seller_admin');
@@ -678,13 +755,13 @@ window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
   const city = document.getElementById('chkCity').value.trim() || 'თბილისი';
   const address = document.getElementById('chkAddress').value.trim() || 'ჭავჭავაძის 37';
   const paymentMethod = document.getElementById('chkPayment').value;
-  const orderId = 'ORD-' + Math.floor(1000 + Math.random() * 9000);
+  const orderId = 'ORD-' + Date.now() + Math.floor(Math.random() * 1000);
   const now = new Date();
   const dateStr = `დღეს, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   const newOrder = {
     id: orderId,
-    user_email: currentUser.email,
+    user_email: authSession ? authSession.user.email : null,
     date: dateStr,
     items: cart,
     subtotal,
@@ -702,11 +779,15 @@ window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
   saveLocalState();
   renderCartDrawer();
 
-  await sbFetch('orders', {
+  const res = await sbFetch('orders', {
     method: 'POST',
     body: JSON.stringify(newOrder),
   });
 
+  if (!res.ok) {
+    showToast('შეკვეთის გაგზავნა ვერ მოხერხდა, სცადეთ თავიდან');
+    return;
+  }
   showToast(`🎉 შეკვეთა #${orderId} გაფორმდა და ჩაიწერა Supabase ბაზაში!`);
 };
 
@@ -714,7 +795,11 @@ window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
 function renderAdminDrawer() {
   const body = document.getElementById('adminDrawerBody');
   const totalRev = orders.reduce((s, o) => s + Number(o.total || 0), 0);
-  const recentMessages = chatMessages.slice(-8);
+  const threads = adminChatThreads();
+  if (!adminActiveThread || !threads.some((t) => t.userId === adminActiveThread)) {
+    adminActiveThread = threads[0]?.userId || null;
+  }
+  const recentMessages = chatMessages.filter((m) => m.user_id && m.user_id === adminActiveThread).slice(-20);
 
   body.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
@@ -738,6 +823,18 @@ function renderAdminDrawer() {
         <h4 style="font-size:13.5px;font-weight:600;">მყიდველების მესიჯები (Live Chat)</h4>
         <span style="font-size:11px;color:#10b981;font-weight:600;">● Cloud Synced</span>
       </div>
+      ${
+        threads.length > 1
+          ? `<select class="text-input" style="margin-bottom:10px;" onchange="selectAdminThread(this.value)">
+              ${threads
+                .map(
+                  (t) =>
+                    `<option value="${escapeHtml(t.userId)}" ${t.userId === adminActiveThread ? 'selected' : ''}>${escapeHtml(t.label)}</option>`
+                )
+                .join('')}
+            </select>`
+          : ''
+      }
       <div style="max-height:190px;overflow-y:auto;background:#fff;border:1px solid #ebebea;border-radius:8px;padding:10px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px;">
         ${
           recentMessages.length === 0
@@ -747,9 +844,9 @@ function renderAdminDrawer() {
                   (m) => `
               <div style="align-self:${m.sender === 'store' ? 'flex-end' : 'flex-start'};max-width:85%;padding:7px 11px;border-radius:8px;font-size:12px;background:${m.sender === 'store' ? '#0f0f10' : '#f7f7f5'};color:${m.sender === 'store' ? '#fff' : '#0f0f10'};">
                 <div style="font-size:10px;opacity:0.7;margin-bottom:2px;font-weight:600;">
-                  ${m.sender === 'store' ? 'ATELIER (ადმინი)' : 'მყიდველი'} · ${m.timestamp || ''}
+                  ${m.sender === 'store' ? 'ATELIER (ადმინი)' : 'მყიდველი'} · ${escapeHtml(m.timestamp)}
                 </div>
-                <div>${m.text}</div>
+                <div>${escapeHtml(m.text)}</div>
               </div>
             `
                 )
@@ -793,15 +890,15 @@ function renderAdminDrawer() {
                 (o) => `
           <div style="background:#fff;padding:10px;border-radius:8px;border:1px solid #ebebea;margin-bottom:8px;font-size:12px;">
             <div style="display:flex;justify-content:space-between;font-weight:600;">
-              <span>#${o.id} · ${o.total} ₾</span>
-              <span style="color:#059669;">${o.status}</span>
+              <span>#${escapeHtml(o.id)} · ${escapeHtml(o.total)} ₾</span>
+              <span style="color:#059669;">${escapeHtml(o.status)}</span>
             </div>
-            <div style="color:#71717a;margin:4px 0;">${o.city}, ${o.address} (${o.payment_method})</div>
+            <div style="color:#71717a;margin:4px 0;">${escapeHtml(o.user_email || 'სტუმარი')} · ${escapeHtml(o.city)}, ${escapeHtml(o.address)} (${escapeHtml(o.payment_method)})</div>
             <div style="display:flex;gap:6px;margin-top:6px;">
               ${['მუშავდება', 'გზაშია', 'ჩაბარებულია']
                 .map(
                   (st) => `
-                <button class="size-pill ${o.status === st ? 'active' : ''}" onclick="changeWebOrderStatus('${o.id}','${st}')">${st}</button>
+                <button class="size-pill ${o.status === st ? 'active' : ''}" data-order-id="${escapeHtml(o.id)}" onclick="changeWebOrderStatus(this.dataset.orderId,'${st}')">${st}</button>
               `
                 )
                 .join('')}
@@ -815,9 +912,32 @@ function renderAdminDrawer() {
   `;
 }
 
+let adminActiveThread = null;
+
+function adminChatThreads() {
+  const byUser = new Map();
+  chatMessages.forEach((m) => {
+    if (!m.user_id) return;
+    const t = byUser.get(m.user_id) || { userId: m.user_id, label: 'მყიდველი', last: 0 };
+    if (m.sender === 'user' && m.sender_name) t.label = m.sender_name;
+    t.last = Math.max(t.last, new Date(m.created_at || Date.now()).getTime());
+    byUser.set(m.user_id, t);
+  });
+  return [...byUser.values()].sort((a, b) => b.last - a.last);
+}
+
+window.selectAdminThread = function (userId) {
+  adminActiveThread = userId;
+  renderAdminDrawer();
+};
+
 window.sendAdminWebReply = async function () {
   const inp = document.getElementById('admChatReplyInp');
   if (!inp || !inp.value.trim()) return;
+  if (!adminActiveThread) {
+    showToast('ჯერ არცერთ მყიდველს არ მოუწერია');
+    return;
+  }
   const text = inp.value.trim();
   inp.value = '';
 
@@ -825,7 +945,8 @@ window.sendAdminWebReply = async function () {
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const replyObj = {
     id: 'msg-admin-' + Date.now(),
-    thread_id: 'thread-store',
+    thread_id: 'thread-' + adminActiveThread,
+    user_id: adminActiveThread,
     sender: 'store',
     text,
     timestamp: timeStr,
@@ -912,19 +1033,19 @@ window.switchWebAuthTab = function (tab) {
 function renderAuthDrawer() {
   const body = document.getElementById('authDrawerBody');
   const isAdmin = currentUser.isLoggedIn && currentUser.role === 'seller_admin';
-  const myOrders = orders.filter((o) => o.user_email === currentUser.email);
+  const myOrders = authSession ? orders.filter((o) => o.user_id === authSession.user.id) : [];
 
   if (currentUser.isLoggedIn) {
     body.innerHTML = `
       <div class="box-card">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <div style="font-size:16px;font-weight:600;">${currentUser.name}</div>
+          <div style="font-size:16px;font-weight:600;">${escapeHtml(currentUser.name)}</div>
           <span style="font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:99px;background:${isAdmin ? '#0f0f10' : '#ebebea'};color:${isAdmin ? '#fff' : '#0f0f10'};">
             ${isAdmin ? 'ADMIN' : 'მყიდველი'}
           </span>
         </div>
-        <div style="font-size:12.5px;color:#71717a;margin-top:4px;">${currentUser.email} ${currentUser.phone ? '· ' + currentUser.phone : ''}</div>
-        <div style="font-size:12.5px;color:#71717a;margin-top:3px;">${currentUser.city}${currentUser.address ? ', ' + currentUser.address : ''}</div>
+        <div style="font-size:12.5px;color:#71717a;margin-top:4px;">${escapeHtml(currentUser.email)} ${currentUser.phone ? '· ' + escapeHtml(currentUser.phone) : ''}</div>
+        <div style="font-size:12.5px;color:#71717a;margin-top:3px;">${escapeHtml(currentUser.city)}${currentUser.address ? ', ' + escapeHtml(currentUser.address) : ''}</div>
       </div>
 
       ${
@@ -947,8 +1068,8 @@ function renderAuthDrawer() {
                   (o) => `
               <div style="background:#fff;padding:10px;border-radius:8px;border:1px solid #ebebea;margin-bottom:6px;font-size:12px;">
                 <div style="display:flex;justify-content:space-between;font-weight:600;">
-                  <span>#${o.id} · ${o.total} ₾</span>
-                  <span style="color:#71717a;">${o.status}</span>
+                  <span>#${escapeHtml(o.id)} · ${escapeHtml(o.total)} ₾</span>
+                  <span style="color:#71717a;">${escapeHtml(o.status)}</span>
                 </div>
               </div>
             `
@@ -957,7 +1078,7 @@ function renderAuthDrawer() {
         }
       </div>
 
-      <button class="btn-secondary full-w" onclick="currentUser={name:'',email:'',phone:'',city:'თბილისი',address:'',role:'customer',isLoggedIn:false}; saveLocalState(); renderAuthDrawer(); showToast('გამოხვედით ანგარიშიდან');">
+      <button class="btn-secondary full-w" onclick="handleWebLogout()">
         ანგარიშიდან გამოსვლა
       </button>
     `;
@@ -1023,46 +1144,81 @@ function renderAuthDrawer() {
   }
 }
 
+// Loads profile + admin flag for the signed-in Supabase user.
+async function loadSignedInUser() {
+  if (!authSession) return false;
+  const uid = authSession.user.id;
+  const [profRes, adminRes] = await Promise.all([
+    sbFetch(`profiles?id=eq.${encodeURIComponent(uid)}&select=*`),
+    sbFetch('rpc/is_admin', { method: 'POST', body: '{}' }),
+  ]);
+  if (!authSession) return false; // refresh token was rejected
+  const prof = profRes.ok && Array.isArray(profRes.data) ? profRes.data[0] : null;
+  currentUser = {
+    name: prof?.name || authSession.user.email.split('@')[0],
+    email: authSession.user.email,
+    phone: prof?.phone || '',
+    city: prof?.city || 'თბილისი',
+    address: prof?.address || '',
+    role: adminRes.ok && adminRes.data === true ? 'seller_admin' : 'customer',
+    isLoggedIn: true,
+  };
+  saveLocalState();
+  return true;
+}
+
+function logoutLocal() {
+  saveAuthSession(null);
+  currentUser = { ...EMPTY_USER };
+  orders = [];
+  chatMessages = [];
+  seenOrderIds = new Set();
+  seenMessageIds = new Set();
+  initialSyncDone = false;
+  saveLocalState();
+}
+
+window.handleWebLogout = async function () {
+  const token = authSession?.access_token;
+  logoutLocal();
+  renderAuthDrawer();
+  renderChatMessages();
+  showToast('გამოხვედით ანგარიშიდან');
+  if (token) authRequest('logout', {}, token).catch(() => {});
+};
+
 window.handleWebLogin = async function () {
   const email = document.getElementById('loginEmail').value.trim().toLowerCase();
-  const password = document.getElementById('loginPass').value.trim();
+  const password = document.getElementById('loginPass').value;
 
   if (!email || !password) {
     showToast('შეიყვანეთ ელ-ფოსტა და პაროლი');
     return;
   }
 
-  const isAdminAccount =
-    ADMIN_EMAILS.includes(email) && (password === 'admin123' || password === '4xR5AJ%NA_fQNu!');
-
-  let profileName = isAdminAccount ? 'ვალერი (Admin)' : email.split('@')[0];
-  let profilePhone = '';
-  let profileCity = 'თბილისი';
-  let profileAddress = '';
-
+  let res;
   try {
-    const profRes = await sbFetch(`profiles?email=eq.${encodeURIComponent(email)}&select=*`);
-    if (profRes.ok && Array.isArray(profRes.data) && profRes.data[0]) {
-      profileName = profRes.data[0].name || profileName;
-      profilePhone = profRes.data[0].phone || '';
-      profileCity = profRes.data[0].city || 'თბილისი';
-      profileAddress = profRes.data[0].address || '';
-    }
-  } catch (e) {}
+    res = await authRequest('token?grant_type=password', { email, password });
+  } catch (e) {
+    showToast('კავშირის შეცდომა, სცადეთ თავიდან');
+    return;
+  }
+  if (!res.ok || !res.data?.access_token) {
+    showToast(
+      res.data?.error_code === 'email_not_confirmed'
+        ? 'ჯერ დაადასტურეთ ელ-ფოსტა (შეამოწმეთ inbox)'
+        : 'ელ-ფოსტა ან პაროლი არასწორია'
+    );
+    return;
+  }
 
-  currentUser = {
-    name: profileName,
-    email,
-    phone: profilePhone,
-    city: profileCity,
-    address: profileAddress,
-    role: isAdminAccount ? 'seller_admin' : 'customer',
-    isLoggedIn: true,
-  };
-  saveLocalState();
+  logoutLocal();
+  saveAuthSession(res.data);
+  await loadSignedInUser();
+  await loadFromSupabase();
   renderAuthDrawer();
   showToast(
-    isAdminAccount
+    currentUser.role === 'seller_admin'
       ? 'შეხვედით ადმინისტრატორის სტატუსით'
       : `მოგესალმებით, ${currentUser.name}`
   );
@@ -1073,47 +1229,47 @@ window.handleWebRegister = async function () {
   const email = document.getElementById('regEmail').value.trim().toLowerCase();
   const phone = document.getElementById('regPhone').value.trim();
   const addr = document.getElementById('regAddress').value.trim() || 'თბილისი';
-  const password = document.getElementById('regPass').value.trim();
+  const password = document.getElementById('regPass').value;
 
   if (!name || !email || !password) {
     showToast('შეავსეთ სახელი, ელ-ფოსტა და პაროლი');
     return;
   }
+  if (password.length < 6) {
+    showToast('პაროლი უნდა იყოს მინიმუმ 6 სიმბოლო');
+    return;
+  }
 
+  // The profile row is created by a database trigger from this metadata
+  // (see supabase/security.sql), so it works even before email confirmation.
+  let res;
   try {
-    const authRes = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-      method: 'POST',
-      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+    res = await authRequest('signup', {
+      email,
+      password,
+      data: { name, phone, city: 'თბილისი', address: addr },
     });
-    const authData = await authRes.json();
-    const uid = authData?.user?.id || 'u-' + Date.now();
-    await sbFetch('profiles', {
-      method: 'POST',
-      body: JSON.stringify({
-        id: uid,
-        name,
-        email,
-        phone,
-        city: 'თბილისი',
-        address: addr,
-        role: 'customer',
-      }),
-    });
-  } catch (e) {}
+  } catch (e) {
+    showToast('კავშირის შეცდომა, სცადეთ თავიდან');
+    return;
+  }
+  if (!res.ok) {
+    showToast(res.data?.msg || 'რეგისტრაცია ვერ მოხერხდა');
+    return;
+  }
 
-  currentUser = {
-    name,
-    email,
-    phone,
-    city: 'თბილისი',
-    address: addr,
-    role: 'customer',
-    isLoggedIn: true,
-  };
-  saveLocalState();
-  renderAuthDrawer();
-  showToast(`რეგისტრაცია დასრულდა, ${name}`);
+  if (res.data?.access_token) {
+    logoutLocal();
+    saveAuthSession(res.data);
+    await loadSignedInUser();
+    await loadFromSupabase();
+    renderAuthDrawer();
+    showToast(`რეგისტრაცია დასრულდა, ${currentUser.name}`);
+  } else {
+    webAuthTab = 'login';
+    renderAuthDrawer();
+    showToast('რეგისტრაცია დასრულდა! დაადასტურეთ ელ-ფოსტა და შემდეგ შედით', null, 6000);
+  }
 };
 
 // Live Chat synced with Supabase messages
@@ -1128,8 +1284,8 @@ function renderChatMessages() {
     .map(
       (m) => `
     <div class="msg-bubble ${m.sender === 'user' ? 'user' : 'store'}">
-      <div>${m.text}</div>
-      <div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right;">${m.timestamp || ''}</div>
+      <div>${escapeHtml(m.text)}</div>
+      <div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right;">${escapeHtml(m.timestamp)}</div>
     </div>
   `
     )
@@ -1143,16 +1299,33 @@ async function sendChatMessage(textOverride) {
   if (!rawText) return;
   if (!textOverride) inp.value = '';
 
-  const isAdmin = currentUser.isLoggedIn && currentUser.role === 'seller_admin';
-  const senderLabel = currentUser.isLoggedIn && !isAdmin ? `[${currentUser.name}] ` : '';
-  const text = isAdmin ? rawText : `${senderLabel}${rawText}`;
+  if (!authSession || !currentUser.isLoggedIn) {
+    showToast('მესიჯის გასაგზავნად შედით ანგარიშზე', () => {
+      renderAuthDrawer();
+      document.getElementById('authDrawerBackdrop').classList.remove('hidden');
+    });
+    if (!textOverride) inp.value = rawText;
+    return;
+  }
+
+  const isAdmin = currentUser.role === 'seller_admin';
+  if (isAdmin) {
+    // Admin replies go to a specific customer's thread from the admin panel
+    if (!textOverride) inp.value = rawText;
+    renderAdminDrawer();
+    document.getElementById('adminDrawerBackdrop').classList.remove('hidden');
+    return;
+  }
+  const text = `[${currentUser.name}] ${rawText}`;
 
   const now = new Date();
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const msgObj = {
     id: 'msg-web-' + Date.now(),
-    thread_id: 'thread-store',
-    sender: isAdmin ? 'store' : 'user',
+    thread_id: 'thread-' + authSession.user.id,
+    user_id: authSession.user.id,
+    sender_name: currentUser.name,
+    sender: 'user',
     text,
     timestamp: timeStr,
     product_ref: null,
@@ -1171,8 +1344,16 @@ async function sendChatMessage(textOverride) {
 document.addEventListener('DOMContentLoaded', () => {
   renderStories();
   renderCatalog();
+  if (authSession) {
+    loadSignedInUser().then((ok) => {
+      if (!ok) logoutLocal();
+      loadFromSupabase();
+    });
+  } else {
+    if (currentUser.isLoggedIn) logoutLocal(); // old pre-Supabase-Auth session
+    loadFromSupabase();
+  }
   updateBadges();
-  loadFromSupabase();
 
   // Poll Supabase every 3 seconds for real-time notifications & cross-platform sync
   setInterval(loadFromSupabase, 3000);
