@@ -1591,3 +1591,27 @@ body {
     border-bottom: 1px solid var(--border);
   }
 }
+
+.chat-guest-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 0;
+  background: #fff;
+  border-top: 1px solid var(--border);
+}
+.chat-guest-row.hidden {
+  display: none;
+}
+.chat-guest-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.chat-guest-row input:focus {
+  border-color: var(--text);
+}
