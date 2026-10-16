@@ -3,147 +3,122 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ATELIER TBILISI — ტანსაცმლის ონლაინ მაღაზია (Official Website)</title>
+  <title>ATELIER — Modern Fashion Store</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Noto+Sans+Georgian:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Georgian:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Top Announcement Ticker -->
-  <div class="top-ticker">
-    <div class="ticker-content">
-      <span>✦ უფასო EXPRESS მიწოდება თბილისსა და რეგიონებში 200 ₾-დან</span>
-      <span class="sep">•</span>
-      <span>პრომო კოდი: <strong>TBILISI20</strong> (-20% ფასდაკლება სრულ კოლექციაზე)</span>
-      <span class="sep">•</span>
-      <span class="cloud-badge"><span class="live-dot"></span> სინქრონიზებულია iOS აპლიკაციასთან (Supabase Cloud)</span>
-    </div>
-  </div>
-
-  <!-- Main Sticky Header -->
+  <!-- Minimalist Sticky Header -->
   <header class="site-header">
     <div class="header-inner">
       <nav class="main-nav">
-        <button class="nav-link active" data-cat="all">ახალი კოლექცია</button>
+        <button class="nav-link active" data-cat="all">ყველა</button>
         <button class="nav-link" data-cat="women">ქალი</button>
         <button class="nav-link" data-cat="men">მამაკაცი</button>
         <button class="nav-link" data-cat="shoes">ფეხსაცმელი</button>
         <button class="nav-link" data-cat="accessories">აქსესუარები</button>
-        <button class="nav-link sale-link" data-cat="sale">SALE %</button>
+        <button class="nav-link sale-link" data-cat="sale">Sale</button>
       </nav>
 
-      <a href="#" class="brand-logo" id="logoReset">
-        <span class="logo-main">ATELIER</span>
-        <span class="logo-sub">TBILISI • PARIS • MILAN</span>
-      </a>
+      <a href="#" class="brand-logo" id="logoReset">ATELIER</a>
 
       <div class="header-actions">
         <div class="search-wrap">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input type="text" id="searchInput" placeholder="ძებნა: Zara, პალტო, ლოფერი..." />
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" id="searchInput" placeholder="ძებნა..." />
         </div>
 
-        <button class="action-btn" id="openAiStylistBtn" title="AI ზომის კალკულატორი">
-          <span>✨ AI სტილისტი</span>
-        </button>
+        <button class="text-btn" id="openAiStylistBtn" title="AI ზომის კალკულატორი">AI ზომა</button>
+        <button class="text-btn" id="openAdminBtn" title="მაღაზიის მართვა">მართვა</button>
 
-        <button class="action-btn" id="openAdminBtn" title="პროდუქტის დამატება & ადმინ-პანელი">
-          <span>⚡ მაღაზიის მართვა</span>
-        </button>
-
-        <button class="icon-btn" id="openAuthBtn" title="პროფილი / ავტორიზაცია">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <button class="icon-btn" id="openAuthBtn" title="პროფილი">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span class="user-label" id="headerUserName">ვალერი</span>
         </button>
 
         <button class="icon-btn" id="openWishlistBtn" title="ფავორიტები">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
           <span class="badge" id="favCountBadge">2</span>
         </button>
 
         <button class="icon-btn bag-btn" id="openCartBtn" title="კალათა">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
           <span class="badge dark" id="cartCountBadge">1</span>
         </button>
       </div>
     </div>
   </header>
 
-  <!-- Editorial Hero Section -->
-  <section class="hero-banner" id="heroSection">
-    <div class="hero-media">
-      <img src="https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1800&q=85" alt="ATELIER AW26 Collection" />
-      <div class="hero-gradient"></div>
-    </div>
-    <div class="hero-content">
-      <div class="hero-eyebrow">AUTUMN / WINTER ’26 EDITORIAL</div>
-      <h1 class="hero-title">THE NEW SILHOUETTE</h1>
-      <p class="hero-desc">
-        იტალიური შალის პალტოები, ნატურალური ტყავის ბომბერები და მულბერის აბრეშუმის კოლექცია.
-        შექმნილია თანამედროვე გარდერობისთვის — სრულად სინქრონიზებული ჩვენს iOS აპლიკაციასთან.
-      </p>
-      <div class="hero-buttons">
-        <button class="btn-primary" id="heroShopSaleBtn">კოლექციის ნახვა</button>
-        <button class="btn-outline-light" id="heroAddProdBtn">+ დაამატე პროდუქტი</button>
+  <!-- Clean Modern Split Hero -->
+  <section class="hero-section" id="heroSection">
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <div class="hero-eyebrow">
+          <span class="live-dot"></span>
+          <span>AUTUMN / WINTER ’26 • CLOUD SYNCED</span>
+        </div>
+        <h1 class="hero-title">მინიმალიზმი და თანამედროვე სილუეტი.</h1>
+        <p class="hero-desc">
+          შერჩეული კოლექცია იტალიური შალის, ნატურალური ტყავისა და აბრეშუმისგან.
+          სრულად სინქრონიზებული ვებ-საიტსა და iOS აპლიკაციას შორის.
+        </p>
+        <div class="hero-buttons">
+          <button class="btn-primary" id="heroShopSaleBtn">კოლექციის ნახვა</button>
+          <button class="btn-secondary" id="heroAddProdBtn">+ პროდუქტის დამატება</button>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <img src="https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1400&q=85" alt="ATELIER Collection" />
       </div>
     </div>
   </section>
 
-  <!-- Lookbook Stories Strip -->
+  <!-- Subtle Stories / Highlights Row -->
   <section class="stories-section">
     <div class="container">
       <div class="stories-strip" id="storiesStrip"></div>
     </div>
   </section>
 
-  <!-- Main Catalog & Filters Section -->
+  <!-- Main Catalog & Minimal Filter Bar -->
   <main class="catalog-section" id="catalogAnchor">
     <div class="container">
-      <!-- Toolbar: Filters & Sort -->
       <div class="catalog-toolbar">
         <div class="toolbar-left">
-          <h2 class="section-heading" id="activeCategoryTitle">ახალი კოლექცია</h2>
-          <span class="items-count" id="productsCountText">8 მოდელი</span>
+          <h2 class="section-heading" id="activeCategoryTitle">ყველა მოდელი</h2>
+          <span class="items-count" id="productsCountText">8 ნივთი</span>
         </div>
 
         <div class="toolbar-filters">
-          <div class="filter-group">
-            <label>ზომა:</label>
-            <div class="size-pills" id="sizeFilterPills">
-              <button class="size-pill active" data-size="">ყველა</button>
-              <button class="size-pill" data-size="XS">XS</button>
-              <button class="size-pill" data-size="S">S</button>
-              <button class="size-pill" data-size="M">M</button>
-              <button class="size-pill" data-size="L">L</button>
-              <button class="size-pill" data-size="XL">XL</button>
-              <button class="size-pill" data-size="38">38</button>
-              <button class="size-pill" data-size="39">39</button>
-              <button class="size-pill" data-size="40">40</button>
-              <button class="size-pill" data-size="41">41</button>
-              <button class="size-pill" data-size="42">42</button>
-            </div>
+          <div class="size-pills" id="sizeFilterPills">
+            <button class="size-pill active" data-size="">ყველა ზომა</button>
+            <button class="size-pill" data-size="XS">XS</button>
+            <button class="size-pill" data-size="S">S</button>
+            <button class="size-pill" data-size="M">M</button>
+            <button class="size-pill" data-size="L">L</button>
+            <button class="size-pill" data-size="XL">XL</button>
+            <button class="size-pill" data-size="38">38</button>
+            <button class="size-pill" data-size="39">39</button>
+            <button class="size-pill" data-size="40">40</button>
+            <button class="size-pill" data-size="41">41</button>
+            <button class="size-pill" data-size="42">42</button>
           </div>
 
-          <div class="filter-group">
-            <label>მაქს. ფასი:</label>
-            <select id="priceFilterSelect" class="select-box">
-              <option value="">ყველა ფასი</option>
-              <option value="200">≤ 200 ₾</option>
-              <option value="300">≤ 300 ₾</option>
-              <option value="400">≤ 400 ₾</option>
-            </select>
-          </div>
+          <select id="priceFilterSelect" class="select-box">
+            <option value="">ფასი: ყველა</option>
+            <option value="200">200 ₾-მდე</option>
+            <option value="300">300 ₾-მდე</option>
+            <option value="400">400 ₾-მდე</option>
+          </select>
 
-          <div class="filter-group">
-            <label>სორტირება:</label>
-            <select id="sortSelect" class="select-box">
-              <option value="featured">რეკომენდებული</option>
-              <option value="price_asc">ფასი: ზრდადობით ↑</option>
-              <option value="price_desc">ფასი: კლებადობით ↓</option>
-              <option value="rating">ყველაზე რეიტინგული ⭐</option>
-            </select>
-          </div>
+          <select id="sortSelect" class="select-box">
+            <option value="featured">სორტირება: რჩეული</option>
+            <option value="price_asc">ფასი: ზრდადობით</option>
+            <option value="price_desc">ფასი: კლებადობით</option>
+            <option value="rating">რეიტინგით</option>
+          </select>
         </div>
       </div>
 
@@ -152,48 +127,48 @@
     </div>
   </main>
 
-  <!-- Editorial Brand Features Strip -->
+  <!-- Minimalist Value Props -->
   <section class="features-strip">
     <div class="container features-grid">
       <div class="feature-card">
-        <div class="feature-icon">🚚</div>
-        <h3>Express მიწოდება 2-4 საათში</h3>
-        <p>თბილისში შეკვეთას მიიღებთ იმავე დღეს, საქართველოს რეგიონებში — 1-2 სამუშაო დღეში.</p>
+        <span class="feature-num">01</span>
+        <h3>სწრაფი მიწოდება</h3>
+        <p>თბილისში იმავე დღეს (2–4 საათში), რეგიონებში 1–2 სამუშაო დღეში.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">📱</div>
-        <h3>iOS App + Web სინქრონიზაცია</h3>
-        <p>ერთიანი Supabase Cloud ბაზა: რასაც დაამატებთ ვებ-საიტზე, მყისიერად ჩანს iPhone აპლიკაციაში.</p>
+        <span class="feature-num">02</span>
+        <h3>ერთიანი Cloud ბაზა</h3>
+        <p>ვებ-საიტი და iOS აპლიკაცია მუშაობს საერთო რეალურ Supabase ბაზაზე.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">✨</div>
-        <h3>AI სტილისტი & ზომის შერჩევა</h3>
-        <p>ჭკვიანი ალგორითმი სიმაღლისა და წონის მიხედვით გირჩევთ იდეალურ ზომასა და შესაბამის ლუქს.</p>
+        <span class="feature-num">03</span>
+        <h3>AI ზომის შერჩევა</h3>
+        <p>ზუსტი რეკომენდაცია სიმაღლისა და წონის პარამეტრების მიხედვით.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🔒</div>
-        <h3>Apple Pay & TBC / BOG გადახდა</h3>
-        <p>უსაფრთხო ონლაინ გადახდა ან კურიერთან ანგარიშსწორება ნივთის მორგების შემდეგ.</p>
+        <span class="feature-num">04</span>
+        <h3>მარტივი გადახდა</h3>
+        <p>Apple Pay, ბარათით გადახდა ან ანგარიშსწორება კურიერთან.</p>
       </div>
     </div>
   </section>
 
-  <!-- Footer -->
+  <!-- Minimal Footer -->
   <footer class="site-footer">
     <div class="container footer-inner">
       <div>
         <div class="footer-logo">ATELIER</div>
-        <p class="footer-sub">პრემიუმ ტანსაცმლის ონლაინ მაღაზია და მარკეტფლეისი • iOS & Web პლატფორმა</p>
+        <p class="footer-sub">თანამედროვე ტანსაცმლის ონლაინ მაღაზია • Web & iOS</p>
       </div>
       <div class="footer-links">
-        <span>📍 თბილისი, ჭავჭავაძის გამზ. 37</span>
-        <span>📞 +995 555 12 34 56</span>
-        <span>☁️ Supabase Cloud Connected</span>
+        <span>თბილისი, ჭავჭავაძის 37</span>
+        <span>+995 555 12 34 56</span>
+        <span>Supabase Cloud</span>
       </div>
     </div>
   </footer>
 
-  <!-- PRODUCT DETAIL MODAL (With AI Size Calc, Outfit Builder & Reviews) -->
+  <!-- PRODUCT DETAIL MODAL -->
   <div class="modal-backdrop hidden" id="productModalBackdrop">
     <div class="product-modal">
       <button class="modal-close" id="closeProductModal">✕</button>
@@ -205,28 +180,28 @@
   <div class="modal-backdrop hidden" id="aiStylistModalBackdrop">
     <div class="small-modal">
       <div class="drawer-header">
-        <h3>✨ AI სტილისტი & ზომის კალკულატორი</h3>
+        <h3>AI ზომის კალკულატორი</h3>
         <button class="icon-close" id="closeAiStylistModal">✕</button>
       </div>
       <div class="modal-pad">
-        <p class="muted-text">შეიყვანეთ თქვენი პარამეტრები და AI გამოთვლის თქვენთვის იდეალურ EU ზომას:</p>
+        <p class="muted-text">შეიყვანეთ თქვენი პარამეტრები იდეალური ზომის გამოსათვლელად:</p>
         <div class="form-row-2">
           <div>
-            <label>სიმაღლე (სმ)</label>
+            <label class="field-label">სიმაღლე (სმ)</label>
             <input type="number" id="aiHeightInput" value="172" class="text-input" />
           </div>
           <div>
-            <label>წონა (კგ)</label>
+            <label class="field-label">წონა (კგ)</label>
             <input type="number" id="aiWeightInput" value="64" class="text-input" />
           </div>
         </div>
-        <label>სასურველი დგომა (Fit)</label>
+        <label class="field-label">სასურველი სილუეტი (Fit)</label>
         <select id="aiFitSelect" class="text-input">
-          <option value="regular">სტანდარტული (Regular Fit)</option>
-          <option value="slim">მომდგარი (Slim Fit)</option>
-          <option value="oversize">თავისუფალი (Oversize Fit)</option>
+          <option value="regular">სტანდარტული (Regular)</option>
+          <option value="slim">მომდგარი (Slim)</option>
+          <option value="oversize">თავისუფალი (Oversize)</option>
         </select>
-        <button class="btn-primary full-w" id="calcAiSizeBtn" style="margin-top:14px;">ზომის გამოთვლა</button>
+        <button class="btn-primary full-w" id="calcAiSizeBtn" style="margin-top:12px;">გამოთვლა</button>
         <div id="aiCalcResultBox" class="ai-result-box hidden"></div>
       </div>
     </div>
@@ -236,7 +211,7 @@
   <div class="drawer-backdrop hidden" id="cartDrawerBackdrop">
     <aside class="side-drawer">
       <div class="drawer-header">
-        <h3>🛍️ კალათა და შეკვეთა (<span id="drawerCartCount">0</span>)</h3>
+        <h3>კალათა (<span id="drawerCartCount">0</span>)</h3>
         <button class="icon-close" id="closeCartDrawer">✕</button>
       </div>
       <div class="drawer-body" id="cartDrawerBody"></div>
@@ -247,7 +222,7 @@
   <div class="drawer-backdrop hidden" id="adminDrawerBackdrop">
     <aside class="side-drawer wide">
       <div class="drawer-header">
-        <h3>⚡ მაღაზიის მართვა & პროდუქტის დამატება (Supabase Cloud)</h3>
+        <h3>მაღაზიის მართვა</h3>
         <button class="icon-close" id="closeAdminDrawer">✕</button>
       </div>
       <div class="drawer-body" id="adminDrawerBody"></div>
@@ -258,35 +233,36 @@
   <div class="drawer-backdrop hidden" id="authDrawerBackdrop">
     <aside class="side-drawer">
       <div class="drawer-header">
-        <h3>👤 მომხმარებლის პროფილი & ავტორიზაცია</h3>
+        <h3>პროფილი</h3>
         <button class="icon-close" id="closeAuthDrawer">✕</button>
       </div>
       <div class="drawer-body" id="authDrawerBody"></div>
     </aside>
   </div>
 
-  <!-- FLOATING LIVE CHAT WIDGET (Synced with Supabase messages) -->
+  <!-- MINIMAL FLOATING LIVE CHAT WIDGET -->
   <div class="chat-widget">
     <button class="chat-fab" id="toggleChatBtn">
-      <span>💬 მიწერე სტილისტს</span>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>ონლაინ კონსულტანტი</span>
     </button>
     <div class="chat-window hidden" id="chatWindow">
       <div class="chat-header">
         <div>
-          <strong>ATELIER Live სტილისტი</strong>
-          <div class="chat-sub">Online • სინქრონიზებულია iOS აპთან</div>
+          <strong>ATELIER კონსულტანტი</strong>
+          <div class="chat-sub">Online • სინქრონიზებულია აპლიკაციასთან</div>
         </div>
         <button class="icon-close light" id="closeChatWindow">✕</button>
       </div>
       <div class="chat-messages" id="chatMessagesList"></div>
       <div class="chat-quick-row">
-        <button class="quick-chip" data-msg="ეს ზომა მარაგშია?">ეს ზომა მარაგშია?</button>
-        <button class="quick-chip" data-msg="პრომო კოდი გაქვთ?">პრომო კოდი გაქვთ?</button>
-        <button class="quick-chip" data-msg="მიწოდება რამდენ ხანშია?">მიწოდება?</button>
+        <button class="quick-chip" data-msg="ეს ზომა მარაგშია?">მარაგშია?</button>
+        <button class="quick-chip" data-msg="პრომო კოდი გაქვთ?">პრომო კოდი</button>
+        <button class="quick-chip" data-msg="მიწოდება რამდენ ხანშია?">მიწოდების დრო</button>
       </div>
       <div class="chat-input-row">
-        <input type="text" id="chatInput" placeholder="დაწერეთ შეტყობინება..." />
-        <button id="sendChatBtn">➤</button>
+        <input type="text" id="chatInput" placeholder="მოგვწერეთ..." />
+        <button id="sendChatBtn">→</button>
       </div>
     </div>
   </div>

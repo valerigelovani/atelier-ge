@@ -277,27 +277,28 @@ function renderCatalog() {
         <div class="prod-img-wrap">
           <img src="${p.images[0]}" alt="${p.title}" loading="lazy" />
           <div class="prod-badges">
-            ${hasSale ? `<span class="pill-sale">-${discountPct}% SALE</span>` : ''}
+            ${hasSale ? `<span class="pill-sale">-${discountPct}%</span>` : ''}
             ${!hasSale && p.isNewArrival ? `<span class="pill-new">NEW</span>` : ''}
           </div>
-          <button class="card-fav-btn" onclick="event.stopPropagation(); toggleFav('${p.id}')">
-            ${isFav ? '❤️' : '🤍'}
+          <button class="card-fav-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFav('${p.id}')" aria-label="Favorite">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
           </button>
           <button class="card-quick-add" onclick="event.stopPropagation(); addToBag('${p.id}', '${p.sizes[0] || 'M'}')">
-            + კალათაში დამატება (${p.sizes[0] || 'M'})
+            + კალათაში (${p.sizes[0] || 'M'})
           </button>
         </div>
         <div class="prod-info">
           <div class="prod-brand-row">
             <span>${p.brand}</span>
-            <span>⭐ ${p.rating} (${p.reviewsCount})</span>
+            <span>${p.sizes.join(' · ')}</span>
           </div>
-          <h3 class="prod-title">${p.title}</h3>
-          <div class="prod-price-row">
-            <span class="prod-price ${hasSale ? 'sale' : ''}">${p.price} ₾</span>
-            ${hasSale ? `<span class="prod-old-price">${p.originalPrice} ₾</span>` : ''}
+          <div class="prod-title-price">
+            <h3 class="prod-title">${p.title}</h3>
+            <div class="prod-price-row">
+              <span class="prod-price ${hasSale ? 'sale' : ''}">${p.price} ₾</span>
+              ${hasSale ? `<span class="prod-old-price">${p.originalPrice} ₾</span>` : ''}
+            </div>
           </div>
-          <div class="prod-sizes-hint">ზომები: ${p.sizes.join(', ')}</div>
         </div>
       </article>
     `;
@@ -311,7 +312,7 @@ window.toggleFav = function (prodId) {
     showToast('წაიშალა ფავორიტებიდან');
   } else {
     favorites.push(prodId);
-    showToast('დაემატა ფავორიტებში ❤️');
+    showToast('დაემატა ფავორიტებში');
   }
   saveLocalState();
   renderCatalog();
@@ -350,20 +351,20 @@ window.openProductModal = function (prodId) {
           <img src="${prod.images[0]}" class="pm-img" alt="${prod.title}" />
         </div>
         <div>
-          <div style="font-size:12px;font-weight:800;color:#6b7280;letter-spacing:1.4px;">${prod.brand} • ⭐ ${prod.rating}</div>
-          <h2 style="font-size:26px;font-weight:800;margin:6px 0 10px;">${prod.title}</h2>
-          <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:18px;">
-            <span style="font-size:28px;font-weight:900;">${prod.price} ₾</span>
-            ${prod.originalPrice ? `<span style="font-size:18px;color:#9ca3af;text-decoration:line-through;">${prod.originalPrice} ₾</span>` : ''}
-            <span style="background:#f3f4f6;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700;">${prod.condition}</span>
+          <div style="font-size:11px;font-weight:600;color:#71717a;letter-spacing:1.2px;text-transform:uppercase;">${prod.brand}</div>
+          <h2 style="font-size:22px;font-weight:600;margin:6px 0 12px;letter-spacing:-0.3px;">${prod.title}</h2>
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:20px;">
+            <span style="font-size:22px;font-weight:600;">${prod.price} ₾</span>
+            ${prod.originalPrice ? `<span style="font-size:15px;color:#a1a1aa;text-decoration:line-through;">${prod.originalPrice} ₾</span>` : ''}
+            <span style="background:#f7f7f5;border:1px solid #ebebea;padding:3px 10px;border-radius:99px;font-size:11px;color:#71717a;">${prod.condition}</span>
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <strong style="font-size:13px;">აირჩიეთ ზომა:</strong>
-            <button class="action-btn" onclick="document.getElementById('aiStylistModalBackdrop').classList.remove('hidden')">✨ AI ზომის კალკულატორი</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <span style="font-size:12.5px;font-weight:500;">ზომა</span>
+            <button class="text-btn" onclick="document.getElementById('aiStylistModalBackdrop').classList.remove('hidden')">AI ზომის კალკულატორი</button>
           </div>
 
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;" id="modalSizeBtns">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;" id="modalSizeBtns">
             ${prod.sizes
               .map(
                 (sz) => `
@@ -374,39 +375,39 @@ window.openProductModal = function (prodId) {
           </div>
 
           <div class="box-card">
-            <div style="font-size:13px;"><strong>ფერი:</strong> ${prod.color} &nbsp;|&nbsp; <strong>შემადგენლობა:</strong> ${prod.material}</div>
-            <p style="font-size:13px;color:#4b5563;margin-top:8px;">${prod.description}</p>
+            <div style="font-size:12.5px;color:#3f3f46;"><strong>ფერი:</strong> ${prod.color} &nbsp;·&nbsp; <strong>მასალა:</strong> ${prod.material}</div>
+            <p style="font-size:13px;color:#71717a;margin-top:8px;line-height:1.6;">${prod.description}</p>
           </div>
 
           <div style="display:flex;gap:10px;margin-bottom:20px;">
             <button class="btn-primary full-w" onclick="addToBag('${prod.id}', '${selectedSz}'); document.getElementById('productModalBackdrop').classList.add('hidden')">
-              🛍️ კალათაში დამატება • ${prod.price} ₾
+              კალათაში დამატება — ${prod.price} ₾
             </button>
-            <button class="action-btn" onclick="inquireProductInChat('${prod.id}')">💬 მიწერე სტილისტს</button>
+            <button class="btn-secondary" onclick="inquireProductInChat('${prod.id}')">მიწერა</button>
           </div>
 
           ${
             outfitMatches.length > 0
               ? `
             <div class="box-card">
-              <strong style="font-size:13px;">👗 AI სტილისტი: შეუხამე მთლიანი ლუქი (Outfit Builder)</strong>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0;">
+              <div style="font-size:12px;font-weight:600;margin-bottom:10px;">შეუხამე სრული ლუქი</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                 ${outfitMatches
                   .map(
                     (m) => `
-                  <div style="display:flex;gap:8px;align-items:center;background:#fff;padding:8px;border-radius:10px;border:1px solid #e5e7eb;cursor:pointer;" onclick="openProductModal('${m.id}')">
-                    <img src="${m.images[0]}" style="width:46px;height:58px;object-fit:cover;border-radius:6px;" />
-                    <div>
-                      <div style="font-size:11px;font-weight:700;">${m.title}</div>
-                      <div style="font-size:12px;font-weight:800;">${m.price} ₾</div>
+                  <div style="display:flex;gap:10px;align-items:center;background:#fff;padding:8px;border-radius:8px;border:1px solid #ebebea;cursor:pointer;" onclick="openProductModal('${m.id}')">
+                    <img src="${m.images[0]}" style="width:42px;height:54px;object-fit:cover;border-radius:4px;" />
+                    <div style="overflow:hidden;">
+                      <div style="font-size:11.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.title}</div>
+                      <div style="font-size:12px;font-weight:600;margin-top:2px;">${m.price} ₾</div>
                     </div>
                   </div>
                 `
                   )
                   .join('')}
               </div>
-              <button class="action-btn full-w" onclick="addToBag('${prod.id}','${selectedSz}'); ${outfitMatches.map((m) => `addToBag('${m.id}','${m.sizes[0] || 'M'}');`).join('')} document.getElementById('productModalBackdrop').classList.add('hidden')">
-                + მთლიანი ლუქის დამატება (${prod.price + outfitMatches.reduce((s, i) => s + i.price, 0)} ₾)
+              <button class="text-btn full-w" style="background:#fff;" onclick="addToBag('${prod.id}','${selectedSz}'); ${outfitMatches.map((m) => `addToBag('${m.id}','${m.sizes[0] || 'M'}');`).join('')} document.getElementById('productModalBackdrop').classList.add('hidden')">
+                + სრული ლუქის დამატება (${prod.price + outfitMatches.reduce((s, i) => s + i.price, 0)} ₾)
               </button>
             </div>
           `
@@ -415,20 +416,20 @@ window.openProductModal = function (prodId) {
 
           <!-- Reviews -->
           <div style="margin-top:16px;">
-            <strong style="font-size:14px;">⭐ მომხმარებლების შეფასებები (${prodReviews.length})</strong>
+            <div style="font-size:13px;font-weight:600;">შეფასებები (${prodReviews.length})</div>
             <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
               ${
                 prodReviews.length === 0
-                  ? `<div class="muted-text">ჯერ შეფასება არ არის — დაწერეთ პირველი!</div>`
+                  ? `<div class="muted-text">ჯერ შეფასება არ არის.</div>`
                   : prodReviews
                       .map(
                         (r) => `
-                  <div style="background:#f9fafb;padding:10px 12px;border-radius:10px;border:1px solid #e5e7eb;font-size:12px;">
-                    <div style="display:flex;justify-content:space-between;font-weight:700;">
-                      <span>${r.userName} (ზომა: ${r.size})</span>
-                      <span>${'⭐'.repeat(r.rating)}</span>
+                  <div style="background:#f7f7f5;padding:10px 12px;border-radius:8px;font-size:12.5px;">
+                    <div style="display:flex;justify-content:space-between;font-weight:500;">
+                      <span>${r.userName} · ზომა ${r.size}</span>
+                      <span style="color:#71717a;">${r.rating}.0 / 5</span>
                     </div>
-                    <div style="margin-top:4px;color:#374151;">${r.comment}</div>
+                    <div style="margin-top:4px;color:#52525b;">${r.comment}</div>
                   </div>
                 `
                       )
@@ -436,8 +437,8 @@ window.openProductModal = function (prodId) {
               }
             </div>
             <div style="display:flex;gap:8px;margin-top:10px;">
-              <input type="text" id="newRevText" placeholder="დაწერეთ თქვენი შეფასება..." class="text-input" style="margin:0;flex:1;" />
-              <button class="btn-primary" style="padding:8px 14px;" onclick="submitWebReview('${prod.id}', '${selectedSz}')">დამატება</button>
+              <input type="text" id="newRevText" placeholder="დაწერეთ შეფასება..." class="text-input" style="margin:0;flex:1;" />
+              <button class="btn-primary" style="padding:8px 16px;" onclick="submitWebReview('${prod.id}', '${selectedSz}')">გაგზავნა</button>
             </div>
           </div>
         </div>
