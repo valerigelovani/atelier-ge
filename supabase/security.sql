@@ -29,7 +29,7 @@ grant execute on function public.is_admin() to anon, authenticated;
 -- 2. Admin accounts (edit the list; only existing auth users are added) ----
 insert into public.admins (user_id)
 select id from auth.users
-where lower(email) in ('valeri@atelier.ge', 'valeri.gelovani@yahoo.com', 'admin@atelier.ge')
+where lower(email) in ('you@example.com')  -- replace with your admin email(s)
 on conflict do nothing;
 
 -- 3. New columns that tie rows to the signed-in user -----------------------
