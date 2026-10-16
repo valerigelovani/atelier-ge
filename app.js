@@ -80,25 +80,11 @@ const stories = [
   },
 ];
 
-let favorites = JSON.parse(localStorage.getItem('atelier_web_favs') || '["prod-1","prod-5"]');
+let favorites = JSON.parse(localStorage.getItem('atelier_web_favs') || '[]');
 let cart = JSON.parse(localStorage.getItem('atelier_web_cart') || '[]');
 let dbProducts = []; // every product row in the database, including hidden ones (admin panel)
 let orders = [];
 let chatMessages = [];
-let reviews = JSON.parse(
-  localStorage.getItem('atelier_web_reviews') ||
-    JSON.stringify([
-      {
-        id: 'r1',
-        productId: 'prod-1',
-        userName: 'ნინი კ.',
-        rating: 5,
-        comment: 'საოცარი ხარისხის პალტოა! კურიერმა თბილისში 2 საათში მომიტანა.',
-        size: 'S',
-        date: 'გუშინ',
-      },
-    ])
-);
 
 localStorage.removeItem('atelier_web_user');
 let currentUser = JSON.parse(localStorage.getItem('atelier_web_user_v2') || 'null') || {
@@ -254,7 +240,6 @@ function saveLocalState() {
   localStorage.setItem('atelier_web_favs', JSON.stringify(favorites));
   localStorage.setItem('atelier_web_cart', JSON.stringify(cart));
   localStorage.setItem('atelier_web_user_v2', JSON.stringify(currentUser));
-  localStorage.setItem('atelier_web_reviews', JSON.stringify(reviews));
   updateBadges();
 }
 
@@ -320,9 +305,6 @@ async function loadFromSupabase() {
     // Storefront shows only products marked "in stock"; keeps demo items if the DB is empty.
     if (dbProducts.length > 0) {
       products = dbProducts.filter((p) => p.inStock !== false);
-      if (cart.length === 0 && products[0]) {
-        cart = [{ product: products[0], size: products[0].sizes[0] || 'M', quantity: 1 }];
-      }
       renderCatalog();
       renderStories();
       updateBadges();
@@ -433,7 +415,6 @@ function renderCatalog() {
     .sort((a, b) => {
       if (filterState.sort === 'price_asc') return a.price - b.price;
       if (filterState.sort === 'price_desc') return b.price - a.price;
-      if (filterState.sort === 'rating') return b.rating - a.rating;
       return 0;
     });
 
@@ -519,7 +500,6 @@ window.openProductModal = function (prodId) {
   if (!prod) return;
   const backdrop = document.getElementById('productModalBackdrop');
   const content = document.getElementById('productModalContent');
-  const prodReviews = reviews.filter((r) => r.productId === prod.id);
   const outfitMatches = products
     .filter((p) => p.id !== prod.id && p.category !== prod.category)
     .slice(0, 2);
@@ -596,33 +576,6 @@ window.openProductModal = function (prodId) {
               : ''
           }
 
-          <!-- Reviews -->
-          <div style="margin-top:16px;">
-            <div style="font-size:13px;font-weight:600;">შეფასებები (${prodReviews.length})</div>
-            <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
-              ${
-                prodReviews.length === 0
-                  ? `<div class="muted-text">ჯერ შეფასება არ არის.</div>`
-                  : prodReviews
-                      .map(
-                        (r) => `
-                  <div style="background:#f7f7f5;padding:10px 12px;border-radius:8px;font-size:12.5px;">
-                    <div style="display:flex;justify-content:space-between;font-weight:500;">
-                      <span>${r.userName} · ზომა ${r.size}</span>
-                      <span style="color:#71717a;">${r.rating}.0 / 5</span>
-                    </div>
-                    <div style="margin-top:4px;color:#52525b;">${r.comment}</div>
-                  </div>
-                `
-                      )
-                      .join('')
-              }
-            </div>
-            <div style="display:flex;gap:8px;margin-top:10px;">
-              <input type="text" id="newRevText" placeholder="დაწერეთ შეფასება..." class="text-input" style="margin:0;flex:1;" />
-              <button class="btn-primary" style="padding:8px 16px;" onclick="submitWebReview('${prod.id}', '${selectedSz}')">გაგზავნა</button>
-            </div>
-          </div>
         </div>
       </div>
     `;
@@ -635,23 +588,6 @@ window.openProductModal = function (prodId) {
 
   renderModalInner();
   backdrop.classList.remove('hidden');
-};
-
-window.submitWebReview = function (prodId, sz) {
-  const inp = document.getElementById('newRevText');
-  if (!inp || !inp.value.trim()) return;
-  reviews.unshift({
-    id: 'rev-' + Date.now(),
-    productId: prodId,
-    userName: currentUser.name || 'მყიდველი',
-    rating: 5,
-    comment: inp.value.trim(),
-    size: sz,
-    date: 'ახლახანს',
-  });
-  saveLocalState();
-  openProductModal(prodId);
-  showToast('შეფასება დაემატა! ⭐');
 };
 
 window.inquireProductInChat = function (prodId) {
@@ -724,13 +660,15 @@ function renderCartDrawer() {
 
     <div class="box-card">
       <strong style="font-size:12px;">მიწოდების დეტალები</strong>
-      <input type="text" id="chkCity" value="${currentUser.city || 'თბილისი'}" placeholder="ქალაქი" class="text-input" />
-      <input type="text" id="chkAddress" value="${currentUser.address || 'ჭავჭავაძის გამზ. 37'}" placeholder="მისამართი" class="text-input" />
-      <select id="chkPayment" class="text-input">
-        <option value="Apple Pay">Apple Pay</option>
-        <option value="TBC / BOG ბარათით">TBC / BOG ბარათით</option>
-        <option value="კურიერთან გადახდა">კურიერთან გადახდა</option>
-      </select>
+      <label class="field-label" style="margin-top:10px;">სახელი და გვარი *</label>
+      <input type="text" id="chkName" value="${escapeHtml(checkoutDraft.name)}" placeholder="მაგ: ნინო ბერიძე" class="text-input" oninput="checkoutDraft.name = this.value" />
+      <label class="field-label">მობილურის ნომერი *</label>
+      <input type="tel" id="chkPhone" value="${escapeHtml(checkoutDraft.phone)}" placeholder="5XX XX XX XX" class="text-input" oninput="checkoutDraft.phone = this.value" />
+      <label class="field-label">ქალაქი *</label>
+      <input type="text" id="chkCity" value="${escapeHtml(checkoutDraft.city)}" placeholder="მაგ: თბილისი" class="text-input" oninput="checkoutDraft.city = this.value" />
+      <label class="field-label">მისამართი *</label>
+      <input type="text" id="chkAddress" value="${escapeHtml(checkoutDraft.address)}" placeholder="ქუჩა, სახლი, ბინა" class="text-input" oninput="checkoutDraft.address = this.value" />
+      <div class="muted-text" style="margin:0;font-size:12px;">💳 გადახდა ხდება ნივთის მიღებისას, კურიერთან.</div>
     </div>
 
     <div class="box-card">
@@ -753,10 +691,28 @@ window.changeCartQty = function (idx, delta) {
   renderCartDrawer();
 };
 
+// Checkout form values survive cart re-renders (quantity changes etc.)
+let checkoutDraft = { name: '', phone: '', city: '', address: '' };
+function fillCheckoutDraftFromProfile() {
+  checkoutDraft = {
+    name: checkoutDraft.name || currentUser.name || '',
+    phone: checkoutDraft.phone || currentUser.phone || '',
+    city: checkoutDraft.city || currentUser.city || 'თბილისი',
+    address: checkoutDraft.address || currentUser.address || '',
+  };
+}
+
+let placingOrder = false;
 window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
-  const city = document.getElementById('chkCity').value.trim() || 'თბილისი';
-  const address = document.getElementById('chkAddress').value.trim() || 'ჭავჭავაძის 37';
-  const paymentMethod = document.getElementById('chkPayment').value;
+  if (placingOrder) return;
+  const name = document.getElementById('chkName').value.trim();
+  const phone = document.getElementById('chkPhone').value.trim();
+  const city = document.getElementById('chkCity').value.trim();
+  const address = document.getElementById('chkAddress').value.trim();
+
+  if (!name) return showToast('შეიყვანეთ სახელი და გვარი');
+  if (phone.replace(/\D/g, '').length < 9) return showToast('შეიყვანეთ სწორი მობილურის ნომერი');
+  if (!city || !address) return showToast('შეიყვანეთ ქალაქი და მისამართი');
   const orderId = 'ORD-' + Date.now() + Math.floor(Math.random() * 1000);
   const now = new Date();
   const dateStr = `დღეს, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -773,24 +729,29 @@ window.placeWebOrder = async function (subtotal, discount, deliveryFee, total) {
     status: 'მუშავდება',
     address,
     city,
-    payment_method: paymentMethod,
+    customer_name: name,
+    phone,
+    payment_method: 'კურიერთან გადახდა',
   };
 
-  orders.unshift(newOrder);
-  cart = [];
-  saveLocalState();
-  renderCartDrawer();
-
+  placingOrder = true;
   const res = await sbFetch('orders', {
     method: 'POST',
     body: JSON.stringify(newOrder),
-  });
+  }).catch(() => ({ ok: false }));
+  placingOrder = false;
 
+  // Keep the cart if sending failed, so the customer can just retry
   if (!res.ok) {
     showToast('შეკვეთის გაგზავნა ვერ მოხერხდა, სცადეთ თავიდან');
     return;
   }
-  showToast(`🎉 შეკვეთა #${orderId} გაფორმდა და ჩაიწერა Supabase ბაზაში!`);
+
+  if (authSession) orders.unshift({ ...newOrder, user_id: authSession.user.id });
+  cart = [];
+  saveLocalState();
+  renderCartDrawer();
+  showToast(`✅ შეკვეთა #${orderId} მიღებულია! მალე დაგიკავშირდებით ნომერზე ${phone}`, null, 7000);
 };
 
 // ===================== Admin panel =====================
@@ -1043,7 +1004,7 @@ function adminOverviewHtml() {
               .map(
                 (o) => `
           <button class="adm-row" data-id="${escapeHtml(o.id)}" onclick="openAdminPanel('orders', { order: this.dataset.id })">
-            <span><b>#${escapeHtml(o.id)}</b><span class="adm-sub"> · ${escapeHtml(o.user_email || 'სტუმარი')}</span></span>
+            <span><b>#${escapeHtml(o.id)}</b><span class="adm-sub"> · ${escapeHtml(o.customer_name || o.user_email || 'სტუმარი')}</span></span>
             <span class="adm-row-right">${money(o.total)} <span class="adm-badge ${STATUS_CLASS[o.status] || ''}">${escapeHtml(o.status)}</span></span>
           </button>`
               )
@@ -1085,7 +1046,7 @@ window.toggleAdminOrder = function (id) {
 
 function adminOrdersHtml() {
   return `
-    <input type="search" id="admOrderSearch" class="text-input" placeholder="ძებნა: ნომერი, ელ-ფოსტა, ქალაქი, მისამართი"
+    <input type="search" id="admOrderSearch" class="text-input" placeholder="ძებნა: ნომერი, სახელი, ტელეფონი, ელ-ფოსტა, მისამართი"
       value="${escapeHtml(adminOrderSearch)}" oninput="adminOrderSearch = this.value; renderAdminOrdersList()" />
     <div class="adm-pills">
       ${['all', ...ORDER_STATUSES]
@@ -1106,7 +1067,10 @@ function renderAdminOrdersList() {
   const list = orders.filter(
     (o) =>
       (adminOrderFilter === 'all' || o.status === adminOrderFilter) &&
-      (!q || [o.id, o.user_email, o.city, o.address].some((v) => String(v || '').toLowerCase().includes(q)))
+      (!q ||
+        [o.id, o.user_email, o.customer_name, o.phone, o.city, o.address].some((v) =>
+          String(v || '').toLowerCase().includes(q)
+        ))
   );
   el.innerHTML = list.length ? list.map(adminOrderCard).join('') : `<div class="adm-empty">შეკვეთები ვერ მოიძებნა</div>`;
 }
@@ -1121,7 +1085,7 @@ function adminOrderCard(o) {
       <button class="adm-order-head" data-id="${id}" onclick="toggleAdminOrder(this.dataset.id)">
         <span>
           <span class="adm-order-id">#${id}</span>
-          <span class="adm-sub">${escapeHtml(formatDateTime(o.created_at) || o.date || '')} · ${escapeHtml(o.user_email || 'სტუმარი')} · ${qty} ნივთი</span>
+          <span class="adm-sub">${escapeHtml(formatDateTime(o.created_at) || o.date || '')} · ${escapeHtml(o.customer_name || o.user_email || 'სტუმარი')} · ${qty} ნივთი</span>
         </span>
         <span class="adm-order-right">
           <b>${money(o.total)}</b>
@@ -1148,6 +1112,9 @@ function adminOrderCard(o) {
           .join('')}
 
         <div class="adm-kv">
+          ${o.customer_name ? `<span>მყიდველი</span><span>${escapeHtml(o.customer_name)}</span>` : ''}
+          ${o.phone ? `<span>ტელეფონი</span><span><a href="tel:${escapeHtml(o.phone.replace(/[^\d+]/g, ''))}">${escapeHtml(o.phone)}</a></span>` : ''}
+          ${o.user_email ? `<span>ელ-ფოსტა</span><span>${escapeHtml(o.user_email)}</span>` : ''}
           <span>მიწოდება</span><span>${escapeHtml(o.city || '')}, ${escapeHtml(o.address || '')}</span>
           <span>გადახდა</span><span>${escapeHtml(o.payment_method || '-')}</span>
           <span>ჯამი</span><span>${money(o.subtotal)}</span>
@@ -2002,6 +1969,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('openCartBtn').addEventListener('click', () => {
+    fillCheckoutDraftFromProfile();
     renderCartDrawer();
     document.getElementById('cartDrawerBackdrop').classList.remove('hidden');
   });
