@@ -228,6 +228,7 @@ let seenOrderIds = new Set();
 let initialSyncDone = false;
 let lastAdminFingerprint = '';
 let lastProductsSig = '';
+let productsReady = false; // until the first load, show skeletons instead of demo items
 
 function playNotifChime() {
   try {
@@ -331,10 +332,17 @@ async function loadFromSupabase() {
       // Storefront shows only products marked "in stock"; keeps demo items if the DB is empty.
       if (dbProducts.length > 0) {
         products = dbProducts.filter((p) => p.inStock !== false);
+        productsReady = true;
         renderCatalog();
         renderHome();
         updateBadges();
       }
+    }
+    if (!productsReady) {
+      // DB unreachable or empty: fall back to the built-in demo items
+      productsReady = true;
+      renderCatalog();
+      renderHome();
     }
 
     if (ordRes.ok && Array.isArray(ordRes.data)) {
@@ -396,6 +404,11 @@ async function loadFromSupabase() {
     initialSyncDone = true;
   } catch (e) {
     console.warn('Using local fallback', e);
+    if (!productsReady) {
+      productsReady = true;
+      renderCatalog();
+      renderHome();
+    }
   }
 }
 
@@ -407,7 +420,7 @@ const DEFAULT_HOME = {
     eyebrow: 'AUTUMN / WINTER ’26 • NEW COLLECTION',
     title: 'მინიმალიზმი და თანამედროვე სილუეტი.',
     text: 'შერჩეული კოლექცია იტალიური შალის, ნატურალური ტყავისა და აბრეშუმისგან. შექმნილია თანამედროვე გარდერობისთვის.',
-    image: unsplash('1490481651871-ab68de25d43d', 1400),
+    image: unsplash('1490481651871-ab68de25d43d', 2000),
   },
   lookbook: [
     { image: unsplash('1539533018447-63fcce2678e3', 1100), title: 'ქალის კოლექცია', text: 'პალტოები, ტრიკოტაჟი, კაბები', category: 'women' },
@@ -424,7 +437,7 @@ const DEFAULT_HOME = {
   },
 };
 
-let homeContent = mergeHome({});
+let homeContent = mergeHome(JSON.parse(localStorage.getItem('atelier_home_cache') || '{}'));
 
 function mergeHome(v) {
   return {
@@ -438,6 +451,7 @@ async function loadHomeContent() {
   const res = await sbFetch('site_content?key=eq.home&select=value').catch(() => null);
   if (res && res.ok && Array.isArray(res.data) && res.data[0]) {
     homeContent = mergeHome(res.data[0].value || {});
+    localStorage.setItem('atelier_home_cache', JSON.stringify(res.data[0].value || {}));
     renderHome();
   }
 }
@@ -467,6 +481,13 @@ function stripCard(p) {
 function renderStrip(sectionId, stripId, list) {
   const section = document.getElementById(sectionId);
   if (!section) return;
+  if (!productsReady) {
+    // placeholder for the first strip only; the rest appear once products load
+    const first = sectionId === 'homeNewSection';
+    section.classList.toggle('hidden', !first);
+    document.getElementById(stripId).innerHTML = first ? SKELETON_CARD.repeat(5) : '';
+    return;
+  }
   section.classList.toggle('hidden', list.length === 0);
   document.getElementById(stripId).innerHTML = list.map(stripCard).join('');
 }
@@ -525,8 +546,20 @@ function renderHome() {
   }
 }
 
+const SKELETON_CARD = `
+  <div class="skel-card" aria-hidden="true">
+    <div class="skel skel-img"></div>
+    <div class="skel skel-line short"></div>
+    <div class="skel skel-line mid"></div>
+  </div>`;
+
 function renderCatalog() {
   const grid = document.getElementById('productGrid');
+  if (!productsReady) {
+    grid.innerHTML = SKELETON_CARD.repeat(8);
+    document.getElementById('productsCountText').textContent = '';
+    return;
+  }
   const filtered = products
     .filter((p) => {
       if (filterState.category === 'sale') {
@@ -668,7 +701,7 @@ window.openProductModal = function (prodId) {
         </div>
         <div>
           <div style="font-size:11px;font-weight:600;color:#71717a;letter-spacing:1.2px;text-transform:uppercase;">${prod.brand}</div>
-          <h2 style="font-size:22px;font-weight:600;margin:6px 0 12px;letter-spacing:-0.3px;">${prod.title}</h2>
+          <h2 class="pm-title" style="font-size:24px;margin:6px 0 12px;letter-spacing:-0.3px;">${prod.title}</h2>
           <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:20px;">
             <span style="font-size:22px;font-weight:600;">${prod.price} ₾</span>
             ${prod.originalPrice ? `<span style="font-size:15px;color:#a1a1aa;text-decoration:line-through;">${prod.originalPrice} ₾</span>` : ''}
@@ -1916,6 +1949,7 @@ window.saveHomeContent = async function () {
     return;
   }
   homeContent = mergeHome(value);
+  localStorage.setItem('atelier_home_cache', JSON.stringify(value));
   renderHome();
   showToast('მთავარი გვერდი განახლდა ✨');
 };
