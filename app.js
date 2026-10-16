@@ -138,6 +138,53 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+// ---- Image upload (Supabase Storage, public bucket "product-images") ----
+const IMAGE_BUCKET = 'product-images';
+
+// Phone photos are 4–10 MB; shrink to max 1600px JPEG before upload.
+async function resizeImage(file, maxSide = 1600) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch (e) {
+    throw new Error('ამ ფორმატის ფოტო ვერ წავიკითხე (სცადეთ JPG ან PNG)');
+  }
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('ფოტოს დამუშავება ვერ მოხერხდა'))), 'image/jpeg', 0.85)
+  );
+}
+
+async function uploadImage(file) {
+  if (!file.type.startsWith('image/')) throw new Error('აირჩიეთ ფოტო');
+  const blob = await resizeImage(file);
+  const token = await getAccessToken();
+  const path = `${new Date().toISOString().slice(0, 7)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${IMAGE_BUCKET}/${path}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'image/jpeg',
+      'x-upsert': 'false',
+    },
+    body: blob,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    if (res.status === 404 || /bucket/i.test(err.message || '')) {
+      throw new Error('ჯერ გაუშვით supabase/005_image_storage.sql Supabase-ში');
+    }
+    throw new Error('ატვირთვა ვერ მოხერხდა: ' + (err.message || res.status));
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${path}`;
+}
+
 const EMPTY_USER = {
   name: '',
   email: '',
@@ -362,12 +409,11 @@ const DEFAULT_HOME = {
     text: 'შერჩეული კოლექცია იტალიური შალის, ნატურალური ტყავისა და აბრეშუმისგან. შექმნილია თანამედროვე გარდერობისთვის.',
     image: unsplash('1490481651871-ab68de25d43d', 1400),
   },
-  categories: {
-    women: unsplash('1539533018447-63fcce2678e3', 700),
-    men: unsplash('1551028719-00167b16eac5', 700),
-    shoes: unsplash('1543163521-1bf539c55dd2', 700),
-    accessories: unsplash('1584917865442-de89df76afd3', 700),
-  },
+  lookbook: [
+    { image: unsplash('1539533018447-63fcce2678e3', 1100), title: 'ქალის კოლექცია', text: 'პალტოები, ტრიკოტაჟი, კაბები', category: 'women' },
+    { image: unsplash('1551028719-00167b16eac5', 900), title: 'მამაკაცის კოლექცია', text: 'ქურთუკები და საბაზო ნივთები', category: 'men' },
+    { image: unsplash('1584917865442-de89df76afd3', 900), title: 'აქსესუარები', text: 'ჩანთები, სათვალეები, საათები', category: 'accessories' },
+  ],
   editorial: {
     eyebrow: 'SEASON EDIT',
     title: 'სეზონის მთავარი ნივთები',
@@ -383,7 +429,7 @@ let homeContent = mergeHome({});
 function mergeHome(v) {
   return {
     hero: { ...DEFAULT_HOME.hero, ...(v.hero || {}) },
-    categories: { ...DEFAULT_HOME.categories, ...(v.categories || {}) },
+    lookbook: DEFAULT_HOME.lookbook.map((d, i) => ({ ...d, ...((v.lookbook || [])[i] || {}) })),
     editorial: { ...DEFAULT_HOME.editorial, ...(v.editorial || {}) },
   };
 }
@@ -427,7 +473,7 @@ function renderStrip(sectionId, stripId, list) {
 }
 
 function renderHome() {
-  const { hero, categories, editorial } = homeContent;
+  const { hero, lookbook, editorial } = homeContent;
 
   const setText = (id, text) => {
     const el = document.getElementById(id);
@@ -439,18 +485,20 @@ function renderHome() {
   const heroImg = document.getElementById('heroImg');
   if (heroImg && hero.image && heroImg.getAttribute('src') !== hero.image) heroImg.src = hero.image;
 
-  const catBox = document.getElementById('homeCategories');
-  if (catBox) {
-    catBox.innerHTML = Object.entries(CATEGORY_LABELS)
-      .map(([cat, label]) => {
-        const count = products.filter((p) => p.category === cat).length;
-        return `
-        <button class="cat-tile" data-cat="${cat}" onclick="goToCategory(this.dataset.cat)">
-          <span class="cat-img"><img src="${escapeHtml(categories[cat] || '')}" alt="${label}" loading="lazy" /></span>
-          <span class="cat-label">${label}</span>
-          <span class="cat-count">${count} მოდელი</span>
-        </button>`;
-      })
+  const lb = document.getElementById('homeLookbook');
+  if (lb) {
+    lb.innerHTML = lookbook
+      .map(
+        (item, i) => `
+        <button class="look-tile look-${i}" data-cat="${escapeHtml(item.category)}" onclick="goToCategory(this.dataset.cat)">
+          <img src="${escapeHtml(item.image)}" alt="" loading="lazy" />
+          <span class="look-caption">
+            <span class="look-title">${escapeHtml(item.title)}</span>
+            ${item.text ? `<span class="look-text">${escapeHtml(item.text)}</span>` : ''}
+            <span class="look-cta">ნახვა →</span>
+          </span>
+        </button>`
+      )
       .join('');
   }
 
@@ -526,6 +574,7 @@ function renderCatalog() {
       <article class="prod-card" onclick="openProductModal('${p.id}')">
         <div class="prod-img-wrap">
           <img src="${p.images[0]}" alt="${p.title}" loading="lazy" />
+          ${p.images[1] ? `<img class="prod-img-alt" src="${p.images[1]}" alt="" loading="lazy" />` : ''}
           <div class="prod-badges">
             ${hasSale ? `<span class="pill-sale">-${discountPct}%</span>` : ''}
             ${!hasSale && p.isNewArrival ? `<span class="pill-new">NEW</span>` : ''}
@@ -592,12 +641,31 @@ window.openProductModal = function (prodId) {
     .slice(0, 2);
 
   let selectedSz = prod.sizes[0] || 'M';
+  const images = prod.images.length ? prod.images : [''];
+  let galleryIndex = 0;
 
   function renderModalInner() {
     content.innerHTML = `
       <div class="pm-grid">
-        <div>
-          <img src="${prod.images[0]}" class="pm-img" alt="${prod.title}" />
+        <div class="pm-gallery">
+          <div class="pm-track" id="pmTrack">
+            ${images
+              .map((u, i) => `<img src="${escapeHtml(u)}" alt="${escapeHtml(prod.title)}" ${i ? 'loading="lazy"' : ''} onclick="openLightbox(${i})" />`)
+              .join('')}
+          </div>
+          ${
+            images.length > 1
+              ? `
+          <button class="pm-arrow prev" onclick="pmGo(-1)" aria-label="წინა">←</button>
+          <button class="pm-arrow next" onclick="pmGo(1)" aria-label="შემდეგი">→</button>
+          <span class="pm-counter" id="pmCounter">${galleryIndex + 1} / ${images.length}</span>
+          <div class="pm-thumbs">
+            ${images
+              .map((u, i) => `<button class="pm-thumb ${i === galleryIndex ? 'active' : ''}" onclick="pmGoTo(${i})"><img src="${escapeHtml(u)}" alt="" loading="lazy" /></button>`)
+              .join('')}
+          </div>`
+              : ''
+          }
         </div>
         <div>
           <div style="font-size:11px;font-weight:600;color:#71717a;letter-spacing:1.2px;text-transform:uppercase;">${prod.brand}</div>
@@ -671,11 +739,91 @@ window.openProductModal = function (prodId) {
   window._pickModalSize = function (sz) {
     selectedSz = sz;
     renderModalInner();
+    bindGallery();
+  };
+
+  // Swipe = native horizontal scroll-snap; arrows/thumbnails scroll the track.
+  function bindGallery() {
+    const track = document.getElementById('pmTrack');
+    if (!track) return;
+    track.scrollLeft = galleryIndex * track.clientWidth;
+    track.onscroll = () => {
+      const i = Math.round(track.scrollLeft / track.clientWidth);
+      if (i === galleryIndex) return;
+      galleryIndex = i;
+      const counter = document.getElementById('pmCounter');
+      if (counter) counter.textContent = `${i + 1} / ${images.length}`;
+      document.querySelectorAll('.pm-thumb').forEach((t, k) => t.classList.toggle('active', k === i));
+    };
+  }
+  window.pmGoTo = function (i) {
+    const track = document.getElementById('pmTrack');
+    if (track) track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' });
+  };
+  window.pmGo = function (dir) {
+    pmGoTo((galleryIndex + dir + images.length) % images.length);
+  };
+  window.openLightbox = function (i) {
+    showLightbox(images, i);
   };
 
   renderModalInner();
   backdrop.classList.remove('hidden');
+  bindGallery();
 };
+
+// Full-screen photo viewer
+function showLightbox(images, start) {
+  let index = start;
+  let box = document.getElementById('lightbox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'lightbox';
+    box.className = 'lightbox';
+    document.body.appendChild(box);
+  }
+  const close = () => {
+    box.classList.add('hidden');
+    document.removeEventListener('keydown', onKey);
+  };
+  const go = (d) => {
+    index = (index + d + images.length) % images.length;
+    render();
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') close();
+    if (e.key === 'ArrowLeft') go(-1);
+    if (e.key === 'ArrowRight') go(1);
+  };
+  function render() {
+    box.innerHTML = `
+      <img src="${escapeHtml(images[index])}" alt="" class="lb-img" />
+      <button class="lb-close" aria-label="დახურვა">✕</button>
+      ${
+        images.length > 1
+          ? `<button class="lb-arrow prev" aria-label="წინა">←</button>
+             <button class="lb-arrow next" aria-label="შემდეგი">→</button>
+             <span class="lb-counter">${index + 1} / ${images.length}</span>`
+          : ''
+      }`;
+    box.querySelector('.lb-close').onclick = close;
+    box.querySelector('.lb-arrow.prev')?.addEventListener('click', () => go(-1));
+    box.querySelector('.lb-arrow.next')?.addEventListener('click', () => go(1));
+    const img = box.querySelector('.lb-img');
+    img.onclick = (e) => {
+      // tap toggles 2x zoom around the tapped point
+      const r = img.getBoundingClientRect();
+      img.style.transformOrigin = `${((e.clientX - r.left) / r.width) * 100}% ${((e.clientY - r.top) / r.height) * 100}%`;
+      img.classList.toggle('zoomed');
+    };
+  }
+  box.onclick = (e) => {
+    if (e.target === box) close();
+  };
+  render();
+  box.classList.remove('hidden');
+  document.addEventListener('keydown', onKey);
+}
 
 window.inquireProductInChat = function (prodId) {
   const prod = products.find((p) => p.id === prodId);
@@ -931,6 +1079,7 @@ window.openAdminPanel = function (tab, opts = {}) {
   if (tab === 'products-new') {
     adminTab = 'products';
     adminEditingProduct = 'new';
+    pfImagesFor = null;
   } else if (tab) {
     adminTab = tab;
     if (tab !== 'products') adminEditingProduct = null;
@@ -1012,7 +1161,7 @@ function renderAdminDrawer() {
 
   if (adminTab === 'orders') renderAdminOrdersList();
   if (adminTab === 'products' && !adminEditingProduct) renderAdminProductsList();
-  if (adminTab === 'products' && adminEditingProduct) updatePfPreview();
+  if (adminTab === 'products' && adminEditingProduct) renderPfImages();
   if (adminTab === 'home') updateHomePreviews();
   if (adminTab === 'chat') {
     const box = document.getElementById('admChatMessages');
@@ -1277,6 +1426,7 @@ window.setAdminProductCat = function (cat) {
 
 window.editAdminProduct = function (id) {
   adminEditingProduct = id;
+  pfImagesFor = null;
   renderAdminDrawer();
   document.getElementById('adminDrawerBody').scrollTop = 0;
 };
@@ -1360,6 +1510,11 @@ function adminProductFormHtml() {
     return adminProductsHtml();
   }
   const sizes = [...new Set([...SIZE_OPTIONS, ...p.sizes])];
+  if (pfImagesFor !== adminEditingProduct) {
+    pfImagesFor = adminEditingProduct;
+    pfImageList = [...p.images];
+    pfUploading = 0;
+  }
 
   return `
     <button class="adm-link" onclick="editAdminProduct(null)">← პროდუქტების სია</button>
@@ -1407,9 +1562,16 @@ function adminProductFormHtml() {
     </div>
 
     <div class="box-card">
-      <label class="field-label">ფოტოების ბმულები * <span class="adm-sub">(თითო ბმული ახალ ხაზზე, პირველი მთავარია)</span></label>
-      <textarea id="pfImages" class="text-input" rows="3" placeholder="https://..." oninput="updatePfPreview()">${escapeHtml(p.images.join('\n'))}</textarea>
-      <div class="adm-img-preview" id="pfPreview"></div>
+      <label class="field-label">ფოტოები * <span class="adm-sub">(პირველი მთავარია; ისრებით შეცვლით რიგს)</span></label>
+      <div class="pf-images" id="pfImageGrid"></div>
+      <div class="pf-image-actions">
+        <label class="btn-primary upload-btn">
+          + ფოტოების ატვირთვა
+          <input type="file" accept="image/*" multiple hidden onchange="uploadProductImages(this.files); this.value = ''" />
+        </label>
+        <input type="text" id="pfImageUrl" class="text-input" placeholder="ან ჩასვით ფოტოს ბმული" onkeydown="if (event.key === 'Enter') addPfImageUrl()" />
+        <button type="button" class="btn-secondary" onclick="addPfImageUrl()">დამატება</button>
+      </div>
     </div>
 
     <div class="box-card">
@@ -1439,16 +1601,73 @@ function adminProductFormHtml() {
   `;
 }
 
-window.updatePfPreview = function () {
-  const box = document.getElementById('pfPreview');
-  const inp = document.getElementById('pfImages');
-  if (!box || !inp) return;
-  box.innerHTML = inp.value
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => /^https?:\/\//i.test(s))
-    .map((u) => `<img src="${escapeHtml(u)}" alt="" onerror="this.classList.add('broken')" />`)
-    .join('');
+let pfImageList = [];
+let pfImagesFor = null;
+let pfUploading = 0;
+
+window.renderPfImages = function () {
+  const grid = document.getElementById('pfImageGrid');
+  if (!grid) return;
+  const last = pfImageList.length - 1;
+  grid.innerHTML =
+    pfImageList
+      .map(
+        (u, i) => `
+      <div class="pf-thumb">
+        <img src="${escapeHtml(u)}" alt="" onerror="this.classList.add('broken')" />
+        ${i === 0 ? '<span class="pf-main">მთავარი</span>' : ''}
+        <div class="pf-thumb-tools">
+          <button type="button" ${i === 0 ? 'disabled' : ''} onclick="movePfImage(${i}, -1)" aria-label="მარცხნივ">←</button>
+          <button type="button" ${i === last ? 'disabled' : ''} onclick="movePfImage(${i}, 1)" aria-label="მარჯვნივ">→</button>
+          <button type="button" onclick="removePfImage(${i})" aria-label="წაშლა">✕</button>
+        </div>
+      </div>`
+      )
+      .join('') + '<div class="pf-thumb loading"><span>იტვირთება…</span></div>'.repeat(pfUploading);
+  if (!pfImageList.length && !pfUploading) grid.innerHTML = '<div class="adm-sub">ფოტო ჯერ არ არის დამატებული</div>';
+};
+
+window.movePfImage = function (i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= pfImageList.length) return;
+  [pfImageList[i], pfImageList[j]] = [pfImageList[j], pfImageList[i]];
+  renderPfImages();
+};
+
+window.removePfImage = function (i) {
+  pfImageList.splice(i, 1);
+  renderPfImages();
+};
+
+window.addPfImageUrl = function () {
+  const inp = document.getElementById('pfImageUrl');
+  const url = inp.value.trim();
+  if (!/^https?:\/\//i.test(url)) return showToast('ბმული უნდა იწყებოდეს https://-ით');
+  pfImageList.push(url);
+  inp.value = '';
+  renderPfImages();
+};
+
+window.uploadProductImages = async function (files) {
+  const list = [...files];
+  if (!list.length) return;
+  const forProduct = adminEditingProduct;
+  pfUploading += list.length;
+  renderPfImages();
+  let failed = 0;
+  // one at a time keeps the order the admin picked
+  for (const file of list) {
+    try {
+      const url = await uploadImage(file);
+      if (adminEditingProduct === forProduct) pfImageList.push(url);
+    } catch (e) {
+      failed += 1;
+      showToast(e.message, null, 6000);
+    }
+    pfUploading -= 1;
+    renderPfImages();
+  }
+  if (!failed) showToast(list.length > 1 ? `${list.length} ფოტო აიტვირთა` : 'ფოტო აიტვირთა');
 };
 
 window.saveAdminProduct = async function () {
@@ -1456,17 +1675,14 @@ window.saveAdminProduct = async function () {
   const title = val('pfTitle');
   const price = Number(val('pfPrice'));
   const oldPrice = Number(val('pfOldPrice'));
-  const images = val('pfImages')
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const images = [...pfImageList];
   const sizes = [...document.querySelectorAll('#pfSizes .size-pill.active')].map((b) => b.dataset.size);
 
   if (!title) return showToast('შეიყვანეთ დასახელება');
   if (!(price > 0)) return showToast('შეიყვანეთ სწორი ფასი');
   if (!sizes.length) return showToast('აირჩიეთ მინიმუმ ერთი ზომა');
-  if (!images.length) return showToast('დაამატეთ მინიმუმ ერთი ფოტოს ბმული');
-  if (images.some((u) => !/^https?:\/\//i.test(u))) return showToast('ფოტოს ბმული უნდა იწყებოდეს https://-ით');
+  if (pfUploading) return showToast('დაელოდეთ ფოტოების ატვირთვას');
+  if (!images.length) return showToast('დაამატეთ მინიმუმ ერთი ფოტო');
 
   const row = {
     title,
@@ -1513,6 +1729,7 @@ window.saveAdminProduct = async function () {
   }
 
   adminEditingProduct = null;
+  pfImagesFor = null;
   await loadFromSupabase();
   renderAdminDrawer();
   showToast(isNew ? 'პროდუქტი გამოქვეყნდა ✨' : 'ცვლილებები შენახულია');
@@ -1549,13 +1766,22 @@ window.deleteWebProduct = async function (id) {
 
 // ---------- Home page content ----------
 function adminHomeHtml(content = homeContent) {
-  const { hero, categories, editorial } = content;
+  const { hero, lookbook, editorial } = content;
+  const linkOptions = (selected) =>
+    [...Object.entries(CATEGORY_LABELS), ['sale', 'ფასდაკლებები'], ['all', 'ყველა მოდელი']]
+      .map(([v, l]) => `<option value="${v}" ${selected === v ? 'selected' : ''}>${l}</option>`)
+      .join('');
   const field = (id, label, value, opts = {}) => `
     <label class="field-label">${label}</label>
     ${
       opts.textarea
         ? `<textarea id="${id}" class="text-input" rows="3">${escapeHtml(value)}</textarea>`
-        : `<input type="text" id="${id}" class="text-input" value="${escapeHtml(value)}" ${opts.image ? 'oninput="updateHomePreviews()" placeholder="https://..."' : ''} />`
+        : opts.image
+        ? `<div class="hm-image-row">
+             <input type="text" id="${id}" class="text-input" value="${escapeHtml(value)}" oninput="updateHomePreviews()" placeholder="https://..." />
+             <label class="btn-secondary upload-btn">ატვირთვა<input type="file" accept="image/*" hidden onchange="uploadIntoField('${id}', this)" /></label>
+           </div>`
+        : `<input type="text" id="${id}" class="text-input" value="${escapeHtml(value)}" />`
     }
     ${opts.image ? `<div class="adm-img-preview" data-preview-for="${id}"></div>` : ''}`;
 
@@ -1570,14 +1796,21 @@ function adminHomeHtml(content = homeContent) {
       ${field('hmHeroImage', 'ფოტოს ბმული', hero.image, { image: true })}
     </div>
 
+    ${lookbook
+      .map(
+        (item, i) => `
     <div class="box-card">
-      <h4 class="adm-h">კატეგორიების ფოტოები</h4>
+      <h4 class="adm-h">ლუქბუქი — ${i === 0 ? 'დიდი ფოტო (მარცხნივ)' : `პატარა ფოტო ${i}`}</h4>
+      ${field('hmLook' + i + 'Image', 'ფოტო', item.image, { image: true })}
       <div class="form-row-2">
-        ${Object.entries(CATEGORY_LABELS)
-          .map(([cat, label]) => `<div>${field('hmCat_' + cat, label, categories[cat], { image: true })}</div>`)
-          .join('')}
+        <div>${field('hmLook' + i + 'Title', 'სათაური', item.title)}</div>
+        <div>${field('hmLook' + i + 'Text', 'ქვესათაური', item.text)}</div>
       </div>
-    </div>
+      <label class="field-label">დაჭერისას გაიხსნება</label>
+      <select id="hmLook${i}Category" class="text-input">${linkOptions(item.category)}</select>
+    </div>`
+      )
+      .join('')}
 
     <div class="box-card">
       <h4 class="adm-h">ფოტო-ბანერი (გვერდის შუაში)</h4>
@@ -1589,11 +1822,7 @@ function adminHomeHtml(content = homeContent) {
         <div>${field('hmEdButton', 'ღილაკის ტექსტი (ცარიელი = ღილაკის გარეშე)', editorial.button)}</div>
         <div>
           <label class="field-label">ღილაკი გახსნის</label>
-          <select id="hmEdCategory" class="text-input">
-            ${[...Object.entries(CATEGORY_LABELS), ['sale', 'ფასდაკლებები'], ['all', 'ყველა მოდელი']]
-              .map(([v, l]) => `<option value="${v}" ${editorial.category === v ? 'selected' : ''}>${l}</option>`)
-              .join('')}
-          </select>
+          <select id="hmEdCategory" class="text-input">${linkOptions(editorial.category)}</select>
         </div>
       </div>
     </div>
@@ -1614,6 +1843,22 @@ window.updateHomePreviews = function () {
   });
 };
 
+window.uploadIntoField = async function (inputId, fileInput) {
+  const file = fileInput.files[0];
+  fileInput.value = '';
+  if (!file) return;
+  const label = fileInput.parentElement;
+  label.classList.add('busy');
+  try {
+    document.getElementById(inputId).value = await uploadImage(file);
+    updateHomePreviews();
+    showToast('ფოტო აიტვირთა — არ დაგავიწყდეთ "შენახვა"');
+  } catch (e) {
+    showToast(e.message, null, 6000);
+  }
+  label.classList.remove('busy');
+};
+
 window.resetHomeForm = function () {
   if (!confirm('ფორმაში დავაბრუნო საწყისი ტექსტები და ფოტოები? (შეინახება მხოლოდ "შენახვაზე" დაჭერის შემდეგ)')) return;
   const body = document.getElementById('adminDrawerBody');
@@ -1624,7 +1869,7 @@ window.resetHomeForm = function () {
 
 window.saveHomeContent = async function () {
   const val = (id) => document.getElementById(id).value.trim();
-  const images = ['hmHeroImage', 'hmEdImage', ...Object.keys(CATEGORY_LABELS).map((c) => 'hmCat_' + c)];
+  const images = ['hmHeroImage', 'hmEdImage', ...homeContent.lookbook.map((_, i) => `hmLook${i}Image`)];
   if (images.some((id) => !/^https?:\/\//i.test(val(id)))) {
     showToast('ყველა ფოტოს ბმული უნდა იწყებოდეს https://-ით');
     return;
@@ -1636,7 +1881,12 @@ window.saveHomeContent = async function () {
 
   const value = {
     hero: { eyebrow: val('hmHeroEyebrow'), title: val('hmHeroTitle'), text: val('hmHeroText'), image: val('hmHeroImage') },
-    categories: Object.fromEntries(Object.keys(CATEGORY_LABELS).map((c) => [c, val('hmCat_' + c)])),
+    lookbook: homeContent.lookbook.map((_, i) => ({
+      image: val(`hmLook${i}Image`),
+      title: val(`hmLook${i}Title`),
+      text: val(`hmLook${i}Text`),
+      category: val(`hmLook${i}Category`),
+    })),
     editorial: {
       eyebrow: val('hmEdEyebrow'),
       title: val('hmEdTitle'),
