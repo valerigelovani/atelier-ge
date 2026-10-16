@@ -444,8 +444,7 @@ async function loadHomeContent() {
 
 window.goToCategory = function (cat) {
   const link = document.querySelector(`.nav-link[data-cat="${cat}"]`);
-  if (link) link.click();
-  document.getElementById('catalogAnchor').scrollIntoView({ behavior: 'smooth' });
+  if (link) link.click(); // the nav handler filters and scrolls to the catalog
 };
 
 function stripCard(p) {
@@ -2407,6 +2406,7 @@ document.addEventListener('DOMContentLoaded', () => {
       filterState.category = btn.dataset.cat;
       document.getElementById('activeCategoryTitle').textContent = btn.textContent;
       renderCatalog();
+      document.getElementById('catalogAnchor').scrollIntoView({ behavior: 'smooth' });
     });
   });
 
